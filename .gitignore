@@ -1,0 +1,20 @@
+# Python virtual environment
+.venv/
+
+# Python cache
+__pycache__/
+*.py[cod]
+
+# Testing/cache
+.pytest_cache/
+
+# Environment secrets
+.env
+
+# Runtime policy state
+config/active_policy.json
+
+# IDE files
+.vs/
+.vscode/
+.idea/

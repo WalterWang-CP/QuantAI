@@ -1,0 +1,16 @@
+{
+  "name": "Global Universe V1",
+  "universe": {
+    "main_universe_size": 1000,
+    "ranking_frequency": "yearly"
+  },
+  "elite_tracking": {
+    "enabled": true,
+    "threshold": 100,
+    "historical_backfill_years": 20
+  },
+  "dropout_tracking": {
+    "enabled": true,
+    "tracking_years": 5
+  }
+}
