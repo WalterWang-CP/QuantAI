@@ -8,11 +8,12 @@ from app.identity.routes import router as identity_router
 from app.universe.routes import router as universe_router
 from app.tracking.routes import router as tracking_router
 from app.providers.routes import router as provider_router
+from app.market_data.routes import router as market_data_router
 
 app = FastAPI(
     title=settings.app_name,
     description="Point-in-time financial data and company universe platform",
-    version="0.7.0",
+    version="0.8.0",
 )
 
 
@@ -21,13 +22,14 @@ app.include_router(identity_router)
 app.include_router(universe_router)
 app.include_router(tracking_router)
 app.include_router(provider_router)
+app.include_router(market_data_router)
 
 
 @app.get("/")
 def root():
     return {
         "application": settings.app_name,
-        "version": "0.7.0",
+        "version": "0.8.0",
         "status": "running",
     }
 

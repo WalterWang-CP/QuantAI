@@ -7,7 +7,12 @@ from alembic import context
 
 from app.core.config import settings
 from app.db.database import Base
-from app.db.models import identity, tracking, universe
+from app.db.models import (
+    identity,
+    market_data,
+    tracking,
+    universe,
+)
 
 # this is the Alembic Config object, which provides
 # access to the values within the .ini file in use.
