@@ -1,3 +1,4 @@
+import json
 from datetime import date
 from decimal import Decimal
 
@@ -7,6 +8,7 @@ from app.core.config import settings
 from app.providers.base import (
     MarketBar,
     MarketDataProvider,
+    RawProviderResponse,
 )
 
 
@@ -17,11 +19,11 @@ class AlphaVantageProvider(MarketDataProvider):
     def provider_name(self) -> str:
         return "alpha_vantage"
 
-    def get_daily_prices(
+    def fetch_daily_response(
         self,
         symbol: str,
         full_history: bool = False,
-    ) -> list[MarketBar]:
+    ) -> RawProviderResponse:
         if settings.alpha_vantage_api_key is None:
             raise RuntimeError(
                 "Alpha Vantage API key is not configured."
@@ -48,7 +50,20 @@ class AlphaVantageProvider(MarketDataProvider):
 
         response.raise_for_status()
 
-        payload = response.json()
+        return RawProviderResponse(
+            body=response.content,
+            content_type=response.headers.get(
+                "content-type"
+            ),
+        )
+
+    def parse_daily_prices(
+        self,
+        response: RawProviderResponse,
+    ) -> list[MarketBar]:
+        payload = json.loads(
+            response.body.decode("utf-8")
+        )
 
         if "Error Message" in payload:
             raise ValueError(
@@ -77,28 +92,28 @@ class AlphaVantageProvider(MarketDataProvider):
         bars = []
 
         for date_text, values in time_series.items():
-            bar = MarketBar(
-                trading_date=date.fromisoformat(
-                    date_text
-                ),
-                open_price=Decimal(
-                    values["1. open"]
-                ),
-                high_price=Decimal(
-                    values["2. high"]
-                ),
-                low_price=Decimal(
-                    values["3. low"]
-                ),
-                close_price=Decimal(
-                    values["4. close"]
-                ),
-                volume=int(
-                    values["5. volume"]
-                ),
+            bars.append(
+                MarketBar(
+                    trading_date=date.fromisoformat(
+                        date_text
+                    ),
+                    open_price=Decimal(
+                        values["1. open"]
+                    ),
+                    high_price=Decimal(
+                        values["2. high"]
+                    ),
+                    low_price=Decimal(
+                        values["3. low"]
+                    ),
+                    close_price=Decimal(
+                        values["4. close"]
+                    ),
+                    volume=int(
+                        values["5. volume"]
+                    ),
+                )
             )
-
-            bars.append(bar)
 
         bars.sort(
             key=lambda bar: bar.trading_date

@@ -13,7 +13,7 @@ from app.market_data.routes import router as market_data_router
 app = FastAPI(
     title=settings.app_name,
     description="Point-in-time financial data and company universe platform",
-    version="0.8.0",
+    version="0.9.0",
 )
 
 
@@ -29,7 +29,7 @@ app.include_router(market_data_router)
 def root():
     return {
         "application": settings.app_name,
-        "version": "0.8.0",
+        "version": "0.9.0",
         "status": "running",
     }
 

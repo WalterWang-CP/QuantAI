@@ -194,3 +194,104 @@ class DailyPriceBar(Base):
             name="uq_daily_price_listing_source_date",
         ),
     )
+
+
+class RawDataArtifact(Base):
+    __tablename__ = "raw_data_artifacts"
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        Uuid,
+        primary_key=True,
+        default=uuid.uuid4,
+    )
+
+    ingestion_run_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("ingestion_runs.id"),
+        nullable=False,
+        unique=True,
+        index=True,
+    )
+
+    source_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("data_sources.id"),
+        nullable=False,
+    )
+
+    listing_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("listings.id"),
+        nullable=False,
+    )
+
+    storage_path: Mapped[str] = mapped_column(
+        String(1000),
+        nullable=False,
+    )
+
+    sha256: Mapped[str] = mapped_column(
+        String(64),
+        nullable=False,
+    )
+
+    content_type: Mapped[str | None] = mapped_column(
+        String(100),
+        nullable=True,
+    )
+
+    byte_count: Mapped[int] = mapped_column(
+        BigInteger,
+        nullable=False,
+    )
+
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+    )
+
+
+class DataQualityIssue(Base):
+    __tablename__ = "data_quality_issues"
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        Uuid,
+        primary_key=True,
+        default=uuid.uuid4,
+    )
+
+    ingestion_run_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("ingestion_runs.id"),
+        nullable=False,
+        index=True,
+    )
+
+    listing_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("listings.id"),
+        nullable=False,
+        index=True,
+    )
+
+    trading_date: Mapped[date | None] = mapped_column(
+        Date,
+        nullable=True,
+    )
+
+    severity: Mapped[str] = mapped_column(
+        String(20),
+        nullable=False,
+    )
+
+    rule_code: Mapped[str] = mapped_column(
+        String(100),
+        nullable=False,
+    )
+
+    message: Mapped[str] = mapped_column(
+        Text,
+        nullable=False,
+    )
+
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+    )
