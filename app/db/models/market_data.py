@@ -120,6 +120,16 @@ class IngestionRun(Base):
         DateTime(timezone=True),
         nullable=True,
     )
+    
+    requested_start_date: Mapped[date | None] = mapped_column(
+        Date,
+        nullable=True,
+    )
+
+    requested_end_date: Mapped[date | None] = mapped_column(
+        Date,
+        nullable=True,
+    )
 
 
 class DailyPriceBar(Base):

@@ -12,6 +12,7 @@ from app.db.models import (
     market_data,
     tracking,
     universe,
+    retrieval,
 )
 
 # this is the Alembic Config object, which provides

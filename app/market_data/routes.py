@@ -1,5 +1,6 @@
 import uuid
 from typing import Annotated
+from datetime import date
 
 import httpx
 from fastapi import (
@@ -51,6 +52,8 @@ def import_daily_prices(
     listing_id: uuid.UUID,
     database: DatabaseSession,
     full_history: bool = False,
+    start_date: date | None = None,
+    end_date: date | None = None,
 ):
     try:
         return import_alpha_vantage_daily_prices(

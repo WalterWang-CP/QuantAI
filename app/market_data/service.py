@@ -1,5 +1,5 @@
 import uuid
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
@@ -61,12 +61,24 @@ def import_alpha_vantage_daily_prices(
     database: Session,
     listing_id: uuid.UUID,
     full_history: bool,
+    start_date: date | None = None,
+    end_date: date | None = None,
 ) -> dict:
+
+    if (
+    start_date is not None
+    and end_date is not None
+    and start_date > end_date
+    ):
+        raise ValueError(
+            "Start date cannot be after end date."
+        )
+    
     listing = database.get(
         Listing,
         listing_id,
     )
-
+    
     if listing is None:
         raise LookupError(
             "Listing does not exist."
@@ -81,11 +93,13 @@ def import_alpha_vantage_daily_prices(
     )
 
     ingestion_run = IngestionRun(
-        source_id=source.id,
-        listing_id=listing.id,
-        requested_symbol=listing.ticker,
-        full_history=full_history,
-        status="running",
+    source_id=source.id,
+    listing_id=listing.id,
+    requested_symbol=listing.ticker,
+    full_history=full_history,
+    requested_start_date=start_date,
+    requested_end_date=end_date,
+    status="running",
     )
 
     database.add(ingestion_run)
@@ -140,9 +154,22 @@ def import_alpha_vantage_daily_prices(
             raw_response
         )
 
-        ingestion_run.rows_received = len(
-            bars
-        )
+        provider_bar_count = len(bars)
+
+        bars = [
+            bar
+            for bar in bars
+            if (
+                start_date is None
+                or bar.trading_date >= start_date
+            )
+            and (
+                end_date is None
+                or bar.trading_date <= end_date
+            )
+        ]
+
+        ingestion_run.rows_received = provider_bar_count
 
         # -------------------------------------------------
         # 5. Validate the normalized bars

@@ -3,7 +3,7 @@ import json
 import uuid
 from datetime import date
 
-from sqlalchemy import or_, select
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.db.models.tracking import (
@@ -127,24 +127,21 @@ def build_tracking_run(
         return existing_run
 
     snapshots_statement = (
-        select(RankingSnapshot)
-        .where(
-            RankingSnapshot.ranking_metric
-            == target_snapshot.ranking_metric,
-            RankingSnapshot.base_currency
-            == target_snapshot.base_currency,
-            or_(
-                RankingSnapshot.ranking_date
-                < target_snapshot.ranking_date,
-                RankingSnapshot.id
-                == target_snapshot.id,
-            ),
-        )
-        .order_by(
-            RankingSnapshot.ranking_date,
-            RankingSnapshot.effective_date,
-        )
+    select(RankingSnapshot)
+    .where(
+        RankingSnapshot.ranking_metric
+        == target_snapshot.ranking_metric,
+        RankingSnapshot.base_currency
+        == target_snapshot.base_currency,
+        RankingSnapshot.effective_date
+        <= target_snapshot.effective_date,
     )
+    .order_by(
+        RankingSnapshot.effective_date,
+        RankingSnapshot.ranking_date,
+        RankingSnapshot.id,
+    )
+)
 
     snapshots = list(
         database.scalars(
