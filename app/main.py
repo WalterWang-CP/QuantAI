@@ -14,7 +14,7 @@ from app.retrieval.routes import router as retrieval_router
 app = FastAPI(
     title=settings.app_name,
     description="Point-in-time financial data and company universe platform",
-    version="0.10.0",
+    version="0.11.0",
 )
 
 
@@ -31,7 +31,7 @@ app.include_router(retrieval_router)
 def root():
     return {
         "application": settings.app_name,
-        "version": "0.10.0",
+        "version": "0.11.0",
         "status": "running",
     }
 

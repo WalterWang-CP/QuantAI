@@ -1,5 +1,5 @@
 import uuid
-from datetime import date, datetime, timezone
+from datetime import date
 
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
@@ -22,9 +22,7 @@ from app.db.models.tracking import (
 from app.db.models.universe import (
     RankingSnapshot,
 )
-from app.market_data.service import (
-    import_alpha_vantage_daily_prices,
-)
+
 
 
 PROVIDER_NAME = "alpha_vantage"
@@ -317,99 +315,3 @@ def get_retrieval_jobs(
         ).all()
     )
 
-def execute_retrieval_job(
-    database: Session,
-    job_id: uuid.UUID,
-) -> RetrievalJob:
-    job = database.get(
-        RetrievalJob,
-        job_id,
-    )
-
-    if job is None:
-        raise LookupError(
-            "Retrieval job does not exist."
-        )
-
-    if job.status == "completed":
-        return job
-
-    if job.provider_name != PROVIDER_NAME:
-        raise ValueError(
-            "Unsupported provider."
-        )
-
-    job.status = "running"
-    job.attempt_count += 1
-
-    job.started_at = datetime.now(
-        timezone.utc
-    )
-
-    job.error_message = None
-
-    database.commit()
-
-    try:
-        result = (
-            import_alpha_vantage_daily_prices(
-                database=database,
-                listing_id=job.listing_id,
-                full_history=job.full_history,
-                start_date=
-                    job.required_start_date,
-                end_date=
-                    job.required_end_date,
-            )
-        )
-
-        job = database.get(
-            RetrievalJob,
-            job_id,
-        )
-
-        job.ingestion_run_id = (
-            result["ingestion_run_id"]
-        )
-
-        if result["status"] == "completed":
-            job.status = "completed"
-        else:
-            job.status = "failed"
-
-            job.error_message = (
-                "Ingestion did not pass "
-                "data validation."
-            )
-
-        job.completed_at = datetime.now(
-            timezone.utc
-        )
-
-        database.commit()
-        database.refresh(job)
-
-        return job
-
-    except Exception as error:
-        database.rollback()
-
-        job = database.get(
-            RetrievalJob,
-            job_id,
-        )
-
-        if job is not None:
-            job.status = "failed"
-
-            job.error_message = str(
-                error
-            )
-
-            job.completed_at = datetime.now(
-                timezone.utc
-            )
-
-            database.commit()
-
-        raise
