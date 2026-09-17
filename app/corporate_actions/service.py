@@ -548,3 +548,46 @@ listing_id: uuid.UUID,
             database.commit()
 
         raise
+
+def get_splits_for_listing(
+database: Session,
+listing_id: uuid.UUID,
+) -> list[StockSplit]:
+    statement = (
+        select(StockSplit)
+        .where(
+            StockSplit.listing_id
+            == listing_id
+        )
+        .order_by(
+            StockSplit.effective_date
+        )
+    )
+
+    return list(
+        database.scalars(
+            statement
+        ).all()
+    )
+
+
+def get_dividends_for_listing(
+    database: Session,
+    listing_id: uuid.UUID,
+) -> list[Dividend]:
+    statement = (
+        select(Dividend)
+        .where(
+            Dividend.listing_id
+            == listing_id
+        )
+        .order_by(
+            Dividend.ex_dividend_date
+        )
+    )
+
+    return list(
+        database.scalars(
+            statement
+        ).all()
+    )

@@ -9,11 +9,14 @@ from app.core.config import settings
 from app.db.database import Base
 from app.db.models import (
     corporate_actions,
+    fundamentals,
+    fx,
     identity,
+    market_cap,
     market_data,
+    retrieval,
     tracking,
     universe,
-    retrieval,
 )
 
 # this is the Alembic Config object, which provides
