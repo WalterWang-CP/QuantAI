@@ -28,6 +28,7 @@ from app.providers.errors import (
     ProviderRateLimitError,
     ProviderRequestError,
     ProviderTemporaryError,
+    ProviderCapabilityError,
 )
 
 
@@ -141,6 +142,22 @@ def get_or_create_throttle_state(
 
     return state
 
+def validate_provider_capability(
+    job: RetrievalJob,
+) -> None:
+    if (
+        job.provider_name
+        == "alpha_vantage"
+        and job.full_history
+        and not settings
+        .alpha_vantage_full_history_enabled
+    ):
+        raise ProviderCapabilityError(
+            "This retrieval requires "
+            "full historical daily data, "
+            "but Alpha Vantage full-history "
+            "access is disabled in QuantAI."
+        )
 
 def get_provider_pause(
     database: Session,
@@ -348,6 +365,29 @@ def execute_retrieval_job(
         and next_retry_at > now
         and not force
     ):
+        return job
+
+    try:
+        validate_provider_capability(
+            job
+        )
+
+    except ProviderCapabilityError as error:
+        job.status = "failed"
+
+        job.last_error_type = (
+            "provider_capability"
+        )
+
+        job.error_message = str(
+            error
+        )
+
+        job.completed_at = utc_now()
+
+        database.commit()
+        database.refresh(job)
+
         return job
 
     reserve_provider_request(

@@ -80,3 +80,34 @@ class DataQualityIssueRead(BaseModel):
     message: str
 
     created_at: datetime
+
+class CoverageGapRead(BaseModel):
+    start_date: date
+    end_date: date
+
+    missing_session_count: int
+
+
+class DailyCoverageRead(BaseModel):
+    listing_id: uuid.UUID
+
+    exchange_code: str
+
+    provider_name: str
+    dataset_name: str
+
+    coverage_start_date: date
+    coverage_end_date: date
+
+    expected_session_count: int
+    stored_session_count: int
+
+    missing_session_count: int
+    unexpected_session_count: int
+
+    coverage_percent: float
+
+    first_stored_date: date | None
+    last_stored_date: date | None
+
+    gaps: list[CoverageGapRead]

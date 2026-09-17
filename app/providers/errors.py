@@ -12,3 +12,9 @@ class ProviderTemporaryError(ProviderError):
 
 class ProviderRequestError(ProviderError):
     pass
+
+
+class ProviderCapabilityError(
+    ProviderRequestError
+):
+    pass

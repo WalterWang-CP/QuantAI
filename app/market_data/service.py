@@ -21,6 +21,13 @@ from app.market_data.raw_archive import (
 from app.providers.alpha_vantage import (
     AlphaVantageProvider,
 )
+from app.calendars.service import (
+    get_recent_sessions,
+)
+from app.core.config import settings
+from app.market_data.coverage import (
+    assess_daily_coverage,
+)
 
 
 ALPHA_VANTAGE_DAILY_DATASET = "TIME_SERIES_DAILY"
@@ -552,3 +559,4 @@ def get_raw_artifact_for_run(
         )
 
     return artifact
+

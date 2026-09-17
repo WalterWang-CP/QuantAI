@@ -21,6 +21,10 @@ class Settings(BaseSettings):
 
     alpha_vantage_batch_daily_budget: int = 20
 
+    alpha_vantage_compact_points: int = 100
+
+    alpha_vantage_full_history_enabled: bool = False
+
     model_config = SettingsConfigDict(
         env_file=".env",
         env_file_encoding="utf-8",

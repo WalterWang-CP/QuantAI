@@ -20,6 +20,7 @@ from app.market_data.service import (
     import_alpha_vantage_daily_prices,
 )
 from app.market_data.schemas import (
+    DailyCoverageRead,
     DailyPriceBarRead,
     DataQualityIssueRead,
     MarketDataImportResult,
@@ -30,6 +31,13 @@ from app.market_data.service import (
     get_quality_issues_for_run,
     get_raw_artifact_for_run,
     import_alpha_vantage_daily_prices,
+)
+
+from app.calendars.service import (
+    UnsupportedExchangeCalendar,
+)
+from app.market_data.coverage import (
+    assess_daily_coverage,
 )
 
 router = APIRouter(
@@ -89,6 +97,43 @@ def import_daily_prices(
             ),
         )
 
+@router.get(
+    "/listings/{listing_id}/coverage",
+    response_model=DailyCoverageRead,
+)
+def read_daily_coverage(
+    listing_id: uuid.UUID,
+    start_date: date,
+    end_date: date,
+    database: DatabaseSession,
+    provider_name: str =
+        "alpha_vantage",
+    dataset_name: str =
+        "TIME_SERIES_DAILY",
+):
+    try:
+        return assess_daily_coverage(
+            database=database,
+            listing_id=listing_id,
+            provider_name=
+                provider_name,
+            dataset_name=
+                dataset_name,
+            start_date=start_date,
+            end_date=end_date,
+        )
+
+    except LookupError as error:
+        raise HTTPException(
+            status_code=404,
+            detail=str(error),
+        )
+
+    except UnsupportedExchangeCalendar as error:
+        raise HTTPException(
+            status_code=422,
+            detail=str(error),
+        )
 
 @router.get(
     "/listings/{listing_id}/daily",

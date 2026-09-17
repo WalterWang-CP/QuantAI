@@ -145,7 +145,7 @@ def create_tracking_run_with_jobs(
                 12,
                 31,
             ),
-            full_history=True,
+            full_history=False,
             status="pending",
             reason="Test job.",
         )
@@ -465,4 +465,63 @@ def test_stale_running_job_is_recovered():
     assert (
         job.last_error_type
         == "stale_running_recovered"
+    )
+
+def test_full_history_capability_failure(
+    monkeypatch,
+):
+    database = create_database()
+
+    tracking_run, jobs = (
+        create_tracking_run_with_jobs(
+            database,
+            job_count=1,
+        )
+    )
+
+    job = jobs[0]
+
+    job.full_history = True
+
+    database.commit()
+
+    monkeypatch.setattr(
+        executor.settings,
+        "alpha_vantage_full_history_enabled",
+        False,
+    )
+
+    def should_not_be_called(
+        *args,
+        **kwargs,
+    ):
+        raise AssertionError(
+            "Provider should not be "
+            "called when full history "
+            "is unavailable."
+        )
+
+    monkeypatch.setattr(
+        executor,
+        "import_alpha_vantage_daily_prices",
+        should_not_be_called,
+    )
+
+    result = (
+        executor.execute_retrieval_job(
+            database=database,
+            job_id=job.id,
+        )
+    )
+
+    assert result.status == "failed"
+
+    assert (
+        result.last_error_type
+        == "provider_capability"
+    )
+
+    assert (
+        result.attempt_count
+        == 0
     )
