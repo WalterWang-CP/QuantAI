@@ -22,8 +22,13 @@ from app.universe.service import (
     create_ranking_snapshot,
     get_ranking_snapshots,
 )
-
-
+from app.universe.market_cap_ranking import (
+    build_market_cap_ranking_snapshot,
+)
+from app.universe.schemas import (
+    MarketCapRankingBuildRequest,
+    MarketCapRankingBuildResult,
+)
 router = APIRouter(
     prefix="/universe",
     tags=["Universe"],
@@ -108,5 +113,40 @@ def preview_universe(
     except LookupError as error:
         raise HTTPException(
             status_code=404,
+            detail=str(error),
+        )
+
+
+@router.post(
+"/market-cap-ranking/build",
+response_model=
+    MarketCapRankingBuildResult,
+)
+def build_market_cap_ranking(
+    payload: MarketCapRankingBuildRequest,
+    database: DatabaseSession,
+):
+    try:
+        return (
+            build_market_cap_ranking_snapshot(
+                database=database,
+
+                ranking_date=
+                    payload.ranking_date,
+
+                effective_date=
+                    payload.effective_date,
+
+                primary_only=
+                    payload.primary_only,
+
+                minimum_candidates=
+                    payload.minimum_candidates,
+            )
+        )
+
+    except ValueError as error:
+        raise HTTPException(
+            status_code=422,
             detail=str(error),
         )

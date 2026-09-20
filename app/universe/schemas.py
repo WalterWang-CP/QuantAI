@@ -1,10 +1,12 @@
 import uuid
 from datetime import date
 from decimal import Decimal
-
-from pydantic import BaseModel, ConfigDict, Field
-
-
+from pydantic import (
+    BaseModel,
+    Field,
+    ConfigDict,
+    model_validator,
+)
 class RankingSnapshotCreate(BaseModel):
     ranking_date: date
     effective_date: date
@@ -86,3 +88,65 @@ class UniversePreview(BaseModel):
     member_count: int
 
     members: list[UniversePreviewMember]
+
+class MarketCapRankingBuildRequest(BaseModel):
+    ranking_date: date
+
+    effective_date: date
+
+    primary_only: bool = True
+
+    minimum_candidates: int = Field(
+        default=1,
+        ge=1,
+        le=100000,
+    )
+
+    @model_validator(
+        mode="after"
+    )
+    def validate_dates(self):
+        if (
+            self.effective_date
+            < self.ranking_date
+        ):
+            raise ValueError(
+                "effective_date cannot be "
+                "earlier than ranking_date."
+            )
+
+        return self
+
+
+class MarketCapRankingMemberRead(BaseModel):
+    company_id: uuid.UUID
+
+    listing_id: uuid.UUID
+
+    ticker: str
+
+    rank: int
+
+    market_cap_usd: Decimal
+
+
+class MarketCapRankingBuildResult(BaseModel):
+    snapshot_id: uuid.UUID
+
+    ranking_date: date
+    effective_date: date
+
+    ranking_metric: str
+    base_currency: str
+
+    candidates_found: int
+
+    companies_ranked: int
+
+    duplicate_company_observations: int
+
+    reused_existing_snapshot: bool
+
+    top_members: list[
+        MarketCapRankingMemberRead
+    ]
