@@ -11,7 +11,6 @@ from app.db.models.identity import Listing
 from app.db.models.market_data import (
     DailyPriceBar,
     DataQualityIssue,
-    DataSource,
     IngestionRun,
     RawDataArtifact,
 )
@@ -31,40 +30,14 @@ from app.market_data.coverage import (
 from app.identity.resolution_service import (
     resolve_provider_symbol,
 )
-
+from app.data_sources.service import (
+    get_or_create_data_source,
+)
 
 ALPHA_VANTAGE_DAILY_DATASET = "TIME_SERIES_DAILY"
 
 
-def get_or_create_data_source(
-    database: Session,
-    provider_name: str,
-    dataset_name: str,
-) -> DataSource:
-    statement = select(
-        DataSource
-    ).where(
-        DataSource.provider_name == provider_name,
-        DataSource.dataset_name == dataset_name,
-    )
 
-    source = database.scalar(
-        statement
-    )
-
-    if source is not None:
-        return source
-
-    source = DataSource(
-        provider_name=provider_name,
-        dataset_name=dataset_name,
-    )
-
-    database.add(source)
-    database.commit()
-    database.refresh(source)
-
-    return source
 
 
 def import_alpha_vantage_daily_prices(

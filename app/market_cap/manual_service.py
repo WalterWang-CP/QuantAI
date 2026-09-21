@@ -11,14 +11,11 @@ from app.db.models.identity import (
     Company,
     Security,
 )
-from app.db.models.market_data import (
-    DataSource,
-)
 from app.market_cap.schemas import (
     FxRateCreate,
     SharesOutstandingCreate,
 )
-from app.market_data.service import (
+from app.data_sources.service import (
     get_or_create_data_source,
 )
 

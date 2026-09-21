@@ -30,7 +30,9 @@ from app.identity.resolution_schemas import (
     ListingProviderSymbolCreate,
     SecurityIdentifierCreate,
 )
-
+from app.data_sources.service import (
+    get_or_create_data_source,
+)
 
 IDENTITY_EVENT_PROVIDER = "manual"
 IDENTITY_EVENT_DATASET = "IDENTITY_EVENTS"
@@ -658,9 +660,7 @@ def add_listing_lifecycle_event(
     database: Session,
     payload: ListingLifecycleEventCreate,
 ) -> ListingLifecycleEvent:
-    from app.market_data.service import (
-    get_or_create_data_source,
-    )
+
     listing = database.get(
         Listing,
         payload.listing_id,
@@ -1070,146 +1070,6 @@ def add_company_relationship(
     database: Session,
     payload: CompanyRelationshipCreate,
 ) -> CompanyRelationship:
-    from app.market_data.service import (
-        get_or_create_data_source,
-    )
-
-    source_company = database.get(
-        Company,
-        payload.source_company_id,
-    )
-
-    if source_company is None:
-        raise LookupError(
-            "Source company does not exist."
-        )
-
-    target_company = database.get(
-        Company,
-        payload.target_company_id,
-    )
-
-    if target_company is None:
-        raise LookupError(
-            "Target company does not exist."
-        )
-
-    if (
-        payload.source_company_id
-        == payload.target_company_id
-    ):
-        raise ValueError(
-            "A company cannot have a "
-            "lifecycle relationship "
-            "with itself."
-        )
-
-    allowed_relationships = {
-        "merged_into",
-        "acquired_by",
-        "spun_off_into",
-        "successor_of",
-    }
-
-    if (
-        payload.relationship_type
-        not in allowed_relationships
-    ):
-        raise ValueError(
-            "Unsupported company "
-            "relationship type."
-        )
-
-    source = get_or_create_data_source(
-        database=database,
-        provider_name=
-            IDENTITY_EVENT_PROVIDER,
-        dataset_name=
-            IDENTITY_EVENT_DATASET,
-    )
-
-    statement = select(
-        CompanyRelationship
-    ).where(
-        CompanyRelationship
-        .source_company_id
-        == payload.source_company_id,
-
-        CompanyRelationship
-        .target_company_id
-        == payload.target_company_id,
-
-        CompanyRelationship
-        .source_id
-        == source.id,
-
-        CompanyRelationship
-        .relationship_type
-        == payload.relationship_type,
-
-        CompanyRelationship
-        .effective_date
-        == payload.effective_date,
-    )
-
-    existing = database.scalar(
-        statement
-    )
-
-    if existing is not None:
-        existing.known_date = (
-            payload.known_date
-        )
-
-        existing.note = (
-            payload.note
-        )
-
-        database.commit()
-        database.refresh(existing)
-
-        return existing
-
-    relationship = CompanyRelationship(
-        source_company_id=
-            payload.source_company_id,
-
-        target_company_id=
-            payload.target_company_id,
-
-        source_id=
-            source.id,
-
-        relationship_type=
-            payload.relationship_type,
-
-        effective_date=
-            payload.effective_date,
-
-        known_date=
-            payload.known_date,
-
-        note=
-            payload.note,
-    )
-
-    database.add(
-        relationship
-    )
-
-    database.commit()
-    database.refresh(
-        relationship
-    )
-
-    return relationship
-def add_company_relationship(
-    database: Session,
-    payload: CompanyRelationshipCreate,
-) -> CompanyRelationship:
-    from app.market_data.service import (
-        get_or_create_data_source,
-    )
 
     source_company = database.get(
         Company,

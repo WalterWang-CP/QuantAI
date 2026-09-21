@@ -23,7 +23,7 @@ from app.db.models.market_data import (
 from app.market_data.raw_archive import (
     archive_raw_response,
 )
-from app.market_data.service import (
+from app.data_sources.service import (
     get_or_create_data_source,
 )
 from app.providers.alpha_vantage import (
