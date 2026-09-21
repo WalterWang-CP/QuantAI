@@ -28,6 +28,15 @@ from app.universe.market_cap_ranking import (
 from app.db.models.fx import (
     FxRate,
 )
+from app.db.models.universe import (
+    CompanyRanking,
+    RankingSnapshot,
+)
+from app.universe.market_cap_ranking import (
+    approve_market_cap_ranking_snapshot,
+    build_market_cap_ranking_snapshot,
+)
+
 
 VALUATION_DATE = date(
     2024,
@@ -266,6 +275,27 @@ def test_market_cap_ranking_orders_companies():
         )
     )
 
+    snapshot = database.get(
+    RankingSnapshot,
+    result["snapshot_id"],
+    )
+
+    assert snapshot.status == "draft"
+
+    assert (
+        snapshot.candidate_count
+        == 3
+    )
+
+    assert (
+        snapshot.ranked_company_count
+        == 3
+    )
+
+    assert (
+        snapshot.minimum_required_candidates
+        == 3
+    )
     assert (
         result["companies_ranked"]
         == 3
@@ -427,3 +457,66 @@ def test_market_cap_ranking_requires_minimum_candidates():
             "Expected candidate-count "
             "validation to fail."
         )
+
+
+def test_market_cap_snapshot_can_be_approved():
+    database = create_database()
+
+    source = DataSource(
+        provider_name="manual",
+        dataset_name=
+            "SHARES_OUTSTANDING",
+    )
+
+    database.add(source)
+    database.commit()
+
+    create_market_cap_candidate(
+        database=database,
+        source=source,
+        name="Company A",
+        ticker="AAA",
+        market_cap_usd=Decimal(
+            "300000000000"
+        ),
+    )
+
+    result = (
+        build_market_cap_ranking_snapshot(
+            database=database,
+
+            ranking_date=
+                VALUATION_DATE,
+
+            effective_date=
+                EFFECTIVE_DATE,
+
+            minimum_candidates=1,
+        )
+    )
+
+    snapshot = (
+        approve_market_cap_ranking_snapshot(
+            database=database,
+
+            snapshot_id=
+                result["snapshot_id"],
+
+            note="Synthetic test approval.",
+        )
+    )
+
+    assert (
+        snapshot.status
+        == "approved"
+    )
+
+    assert (
+        snapshot.approved_at
+        is not None
+    )
+
+    assert (
+        snapshot.approval_note
+        == "Synthetic test approval."
+    )

@@ -1,4 +1,8 @@
-from datetime import date
+from datetime import (
+    date,
+    datetime,
+    timezone,
+)
 from decimal import Decimal
 
 from sqlalchemy import (
@@ -18,10 +22,12 @@ from app.db.models.universe import (
     CompanyRanking,
     RankingSnapshot,
 )
-
+from app.universe.constants import (
+    RECONSTRUCTED_MARKET_CAP_METRIC,
+)
 
 RANKING_METRIC = (
-    "reconstructed_market_cap_usd"
+    RECONSTRUCTED_MARKET_CAP_METRIC
 )
 
 BASE_CURRENCY = "USD"
@@ -199,6 +205,9 @@ def build_market_cap_ranking_snapshot(
             "companies_ranked":
                 ranking_count,
 
+            "snapshot_status":
+                existing_snapshot.status,
+
             "duplicate_company_observations":
                 0,
 
@@ -344,8 +353,20 @@ def build_market_cap_ranking_snapshot(
     snapshot = RankingSnapshot(
         ranking_date=ranking_date,
         effective_date=effective_date,
+
         ranking_metric=RANKING_METRIC,
         base_currency=BASE_CURRENCY,
+
+        status="draft",
+
+        candidate_count=
+            candidates_found,
+
+        ranked_company_count=
+            len(candidates),
+
+        minimum_required_candidates=
+            minimum_candidates,
     )
 
     database.add(
@@ -431,6 +452,9 @@ def build_market_cap_ranking_snapshot(
         "base_currency":
             snapshot.base_currency,
 
+        "snapshot_status":
+            snapshot.status,
+
         "candidates_found":
             candidates_found,
 
@@ -446,3 +470,79 @@ def build_market_cap_ranking_snapshot(
         "top_members":
             top_members,
     }
+
+def approve_market_cap_ranking_snapshot(
+    database: Session,
+    snapshot_id,
+    note: str | None = None,
+) -> RankingSnapshot:
+    snapshot = database.get(
+        RankingSnapshot,
+        snapshot_id,
+    )
+
+    if snapshot is None:
+        raise LookupError(
+            "Ranking snapshot does not exist."
+        )
+
+    if (
+        snapshot.ranking_metric
+        != RANKING_METRIC
+    ):
+        raise ValueError(
+            "Only reconstructed market-cap "
+            "snapshots use this approval flow."
+        )
+
+    if snapshot.status == "approved":
+        return snapshot
+
+    if snapshot.status == "rejected":
+        raise ValueError(
+            "Rejected ranking snapshots "
+            "cannot be approved."
+        )
+
+    ranked_count = (
+        snapshot.ranked_company_count
+    )
+
+    minimum_required = (
+        snapshot.minimum_required_candidates
+    )
+
+    if (
+        ranked_count is None
+        or minimum_required is None
+    ):
+        raise ValueError(
+            "Snapshot completeness metadata "
+            "is missing."
+        )
+
+    if (
+        ranked_count
+        < minimum_required
+    ):
+        raise ValueError(
+            "Snapshot does not satisfy its "
+            "minimum candidate requirement."
+        )
+
+    snapshot.status = "approved"
+
+    snapshot.approved_at = (
+        datetime.now(
+            timezone.utc
+        )
+    )
+
+    snapshot.approval_note = note
+
+    database.commit()
+    database.refresh(
+        snapshot
+    )
+
+    return snapshot

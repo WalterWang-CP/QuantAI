@@ -15,6 +15,8 @@ from app.universe.schemas import (
     RankingSnapshotCreate,
     RankingSnapshotRead,
     UniversePreview,
+    RankingSnapshotApprovalRead,
+    RankingSnapshotApprovalRequest,
 )
 from app.universe.service import (
     add_company_ranking,
@@ -24,6 +26,7 @@ from app.universe.service import (
 )
 from app.universe.market_cap_ranking import (
     build_market_cap_ranking_snapshot,
+    approve_market_cap_ranking_snapshot,
 )
 from app.universe.schemas import (
     MarketCapRankingBuildRequest,
@@ -143,6 +146,61 @@ def build_market_cap_ranking(
                 minimum_candidates=
                     payload.minimum_candidates,
             )
+        )
+
+    except ValueError as error:
+        raise HTTPException(
+            status_code=422,
+            detail=str(error),
+        )
+
+@router.post(
+"/snapshots/{snapshot_id}/approve",
+response_model=
+    RankingSnapshotApprovalRead,
+)
+def approve_ranking_snapshot(
+    snapshot_id: uuid.UUID,
+    payload: RankingSnapshotApprovalRequest,
+    database: DatabaseSession,
+):
+    try:
+        snapshot = (
+            approve_market_cap_ranking_snapshot(
+                database=database,
+                snapshot_id=snapshot_id,
+                note=payload.note,
+            )
+        )
+
+        return {
+            "snapshot_id":
+                snapshot.id,
+
+            "status":
+                snapshot.status,
+
+            "candidate_count":
+                snapshot.candidate_count,
+
+            "ranked_company_count":
+                snapshot.ranked_company_count,
+
+            "minimum_required_candidates":
+                snapshot
+                .minimum_required_candidates,
+
+            "approved_at":
+                snapshot.approved_at,
+
+            "approval_note":
+                snapshot.approval_note,
+        }
+
+    except LookupError as error:
+        raise HTTPException(
+            status_code=404,
+            detail=str(error),
         )
 
     except ValueError as error:

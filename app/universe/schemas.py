@@ -1,5 +1,5 @@
 import uuid
-from datetime import date
+from datetime import date, datetime
 from decimal import Decimal
 from pydantic import (
     BaseModel,
@@ -139,6 +139,8 @@ class MarketCapRankingBuildResult(BaseModel):
     ranking_metric: str
     base_currency: str
 
+    snapshot_status: str
+
     candidates_found: int
 
     companies_ranked: int
@@ -150,3 +152,26 @@ class MarketCapRankingBuildResult(BaseModel):
     top_members: list[
         MarketCapRankingMemberRead
     ]
+
+class RankingSnapshotApprovalRequest(
+    BaseModel
+):
+    note: str | None = None
+
+
+class RankingSnapshotApprovalRead(
+    BaseModel
+):
+    snapshot_id: uuid.UUID
+
+    status: str
+
+    candidate_count: int | None
+
+    ranked_company_count: int | None
+
+    minimum_required_candidates: int | None
+
+    approved_at: datetime | None
+
+    approval_note: str | None

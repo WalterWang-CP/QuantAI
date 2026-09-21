@@ -15,7 +15,9 @@ from app.db.models.universe import (
     RankingSnapshot,
 )
 from app.policy.service import get_active_policy
-
+from app.universe.constants import (
+    RECONSTRUCTED_MARKET_CAP_METRIC,
+)
 
 TRACKING_ENGINE_VERSION = "1.0"
 
@@ -99,7 +101,20 @@ def build_tracking_run(
         raise LookupError(
             "Ranking snapshot does not exist."
         )
-
+    
+    if (
+    target_snapshot.ranking_metric
+    == RECONSTRUCTED_MARKET_CAP_METRIC
+    and target_snapshot.status
+    != "approved"
+    ):
+        raise ValueError(
+            "Reconstructed market-cap "
+            "ranking snapshots must be "
+            "approved before tracking "
+            "decisions can be built."
+        )
+    
     policy = get_active_policy()
 
     policy_json = policy.model_dump(

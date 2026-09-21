@@ -12,11 +12,12 @@ from app.market_data.routes import router as market_data_router
 from app.retrieval.routes import router as retrieval_router
 from app.corporate_actions.routes import router as corporate_actions_router
 from app.market_cap.routes import router as market_cap_router
+from app.workflows.routes import router as workflows_router
 
 app = FastAPI(
     title=settings.app_name,
     description="Point-in-time financial data and company universe platform",
-    version="0.15.0",
+    version="0.16.0",
 )
 
 
@@ -29,12 +30,13 @@ app.include_router(market_data_router)
 app.include_router(retrieval_router)
 app.include_router(corporate_actions_router)
 app.include_router(market_cap_router)
+app.include_router(workflows_router)
 
 @app.get("/")
 def root():
     return {
         "application": settings.app_name,
-        "version": "0.15.0",
+        "version": "0.16.0",
         "status": "running",
     }
 

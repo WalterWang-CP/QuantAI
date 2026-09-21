@@ -7,8 +7,10 @@ from sqlalchemy import (
     Date,
     DateTime,
     ForeignKey,
+    Integer,
     Numeric,
     String,
+    Text,
     UniqueConstraint,
     Uuid,
     func,
@@ -52,6 +54,47 @@ class RankingSnapshot(Base):
         default="USD",
     )
 
+    status: Mapped[str] = mapped_column(
+        String(20),
+        nullable=False,
+        default="legacy",
+        index=True,
+    )
+
+    candidate_count: Mapped[
+        int | None
+    ] = mapped_column(
+        Integer,
+        nullable=True,
+    )
+
+    ranked_company_count: Mapped[
+        int | None
+    ] = mapped_column(
+        Integer,
+        nullable=True,
+    )
+
+    minimum_required_candidates: Mapped[
+        int | None
+    ] = mapped_column(
+        Integer,
+        nullable=True,
+    )
+
+    approved_at: Mapped[
+        datetime | None
+    ] = mapped_column(
+        DateTime(timezone=True),
+        nullable=True,
+    )
+
+    approval_note: Mapped[
+        str | None
+    ] = mapped_column(
+        Text,
+        nullable=True,
+    )
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         nullable=False,
@@ -70,6 +113,11 @@ class RankingSnapshot(Base):
         ),
     )
 
+    CheckConstraint(
+    "status IN "
+    "('legacy', 'draft', 'approved', 'rejected')",
+    name="ck_ranking_snapshot_status",
+    ),
 
 class CompanyRanking(Base):
     __tablename__ = "company_rankings"
