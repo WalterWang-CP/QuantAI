@@ -24,7 +24,25 @@ from app.identity.resolution_service import (
     resolve_provider_symbol,
     resolve_security_identifier,
 )
-
+from app.identity.resolution_schemas import (
+    CompanyIdentifierCreate,
+    CompanyRelationshipCreate,
+    ListingLifecycleEventCreate,
+    ListingProviderSymbolCreate,
+    SecurityIdentifierCreate,
+)
+from app.identity.resolution_service import (
+    add_company_identifier,
+    add_company_relationship,
+    add_listing_lifecycle_event,
+    add_listing_provider_symbol,
+    add_security_identifier,
+    get_company_relationships,
+    get_listing_lifecycle_events,
+    resolve_company_identifier,
+    resolve_provider_symbol,
+    resolve_security_identifier,
+)
 
 def create_database():
     engine = create_engine(
@@ -210,3 +228,318 @@ def test_provider_symbol_falls_back_to_ticker():
     )
 
     assert symbol == "SYN"
+
+
+def test_company_relationship():
+    database = create_database()
+
+    company_a, _, _ = create_identity(
+        database
+    )
+
+    company_b = Company(
+        legal_name="Successor Corp",
+        country_code="US",
+    )
+
+    database.add(company_b)
+    database.commit()
+
+    relationship = (
+        add_company_relationship(
+            database=database,
+
+            payload=
+                CompanyRelationshipCreate(
+                    source_company_id=
+                        company_a.id,
+
+                    target_company_id=
+                        company_b.id,
+
+                    relationship_type=
+                        "merged_into",
+
+                    known_date=date(
+                        2024,
+                        5,
+                        1,
+                    ),
+
+                    effective_date=date(
+                        2024,
+                        7,
+                        1,
+                    ),
+
+                    note=
+                        "Synthetic merger.",
+                ),
+        )
+    )
+
+    assert (
+        relationship
+        .source_company_id
+        == company_a.id
+    )
+
+    assert (
+        relationship
+        .target_company_id
+        == company_b.id
+    )
+
+    relationships = (
+        get_company_relationships(
+            database=database,
+            company_id=company_a.id,
+        )
+    )
+
+    assert len(
+        relationships
+    ) == 1
+
+
+def test_company_relationship():
+    database = create_database()
+
+    company_a, _, _ = create_identity(
+        database
+    )
+
+    company_b = Company(
+        legal_name="Successor Corp",
+        country_code="US",
+    )
+
+    database.add(company_b)
+    database.commit()
+
+    relationship = (
+        add_company_relationship(
+            database=database,
+
+            payload=
+                CompanyRelationshipCreate(
+                    source_company_id=
+                        company_a.id,
+
+                    target_company_id=
+                        company_b.id,
+
+                    relationship_type=
+                        "merged_into",
+
+                    known_date=date(
+                        2024,
+                        5,
+                        1,
+                    ),
+
+                    effective_date=date(
+                        2024,
+                        7,
+                        1,
+                    ),
+
+                    note=
+                        "Synthetic merger.",
+                ),
+        )
+    )
+
+    assert (
+        relationship
+        .source_company_id
+        == company_a.id
+    )
+
+    assert (
+        relationship
+        .target_company_id
+        == company_b.id
+    )
+
+    relationships = (
+        get_company_relationships(
+            database=database,
+            company_id=company_a.id,
+        )
+    )
+
+    assert len(
+        relationships
+    ) == 1
+
+def test_listing_ticker_change():
+    database = create_database()
+
+    _, security, old_listing = (
+        create_identity(
+            database
+        )
+    )
+
+    new_listing = Listing(
+        security_id=security.id,
+
+        ticker="NEW",
+
+        exchange_code="NASDAQ",
+
+        currency_code="USD",
+
+        start_date=date(
+            2024,
+            7,
+            1,
+        ),
+
+        is_primary=True,
+    )
+
+    database.add(new_listing)
+    database.commit()
+
+    event = (
+        add_listing_lifecycle_event(
+            database=database,
+
+            payload=
+                ListingLifecycleEventCreate(
+                    listing_id=
+                        old_listing.id,
+
+                    successor_listing_id=
+                        new_listing.id,
+
+                    event_type=
+                        "ticker_change",
+
+                    known_date=date(
+                        2024,
+                        6,
+                        15,
+                    ),
+
+                    effective_date=date(
+                        2024,
+                        7,
+                        1,
+                    ),
+
+                    note=
+                        "Synthetic ticker change.",
+                ),
+        )
+    )
+
+    assert (
+        event.successor_listing_id
+        == new_listing.id
+    )
+
+    events = (
+        get_listing_lifecycle_events(
+            database=database,
+            listing_id=
+                old_listing.id,
+        )
+    )
+
+    assert len(events) == 1
+
+def test_provider_symbol_respects_validity():
+    database = create_database()
+
+    _, _, listing = create_identity(
+        database
+    )
+
+    add_listing_provider_symbol(
+        database=database,
+
+        payload=
+            ListingProviderSymbolCreate(
+                listing_id=listing.id,
+
+                provider_name=
+                    "alpha_vantage",
+
+                symbol="OLD",
+
+                valid_from=date(
+                    2020,
+                    1,
+                    1,
+                ),
+
+                valid_to=date(
+                    2023,
+                    12,
+                    31,
+                ),
+            ),
+    )
+
+    add_listing_provider_symbol(
+        database=database,
+
+        payload=
+            ListingProviderSymbolCreate(
+                listing_id=listing.id,
+
+                provider_name=
+                    "alpha_vantage",
+
+                symbol="NEW",
+
+                valid_from=date(
+                    2024,
+                    1,
+                    1,
+                ),
+
+                valid_to=None,
+            ),
+    )
+
+    old_symbol = (
+        resolve_provider_symbol(
+            database=database,
+
+            listing_id=listing.id,
+
+            provider_name=
+                "alpha_vantage",
+
+            as_of_date=date(
+                2023,
+                6,
+                1,
+            ),
+        )
+    )
+
+    new_symbol = (
+        resolve_provider_symbol(
+            database=database,
+
+            listing_id=listing.id,
+
+            provider_name=
+                "alpha_vantage",
+
+            as_of_date=date(
+                2025,
+                6,
+                1,
+            ),
+        )
+    )
+
+    assert old_symbol == "OLD"
+
+    assert new_symbol == "NEW"

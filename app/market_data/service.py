@@ -28,6 +28,9 @@ from app.core.config import settings
 from app.market_data.coverage import (
     assess_daily_coverage,
 )
+from app.identity.resolution_service import (
+    resolve_provider_symbol,
+)
 
 
 ALPHA_VANTAGE_DAILY_DATASET = "TIME_SERIES_DAILY"
@@ -91,6 +94,26 @@ def import_alpha_vantage_daily_prices(
             "Listing does not exist."
         )
 
+    symbol_as_of_date = (
+        end_date
+        if end_date is not None
+        else date.today()
+    )
+
+    provider_symbol = (
+        resolve_provider_symbol(
+            database=database,
+
+            listing_id=listing.id,
+
+            provider_name=
+                "alpha_vantage",
+
+            as_of_date=
+                symbol_as_of_date,
+        )
+    )
+
     provider = AlphaVantageProvider()
 
     source = get_or_create_data_source(
@@ -102,7 +125,7 @@ def import_alpha_vantage_daily_prices(
     ingestion_run = IngestionRun(
     source_id=source.id,
     listing_id=listing.id,
-    requested_symbol=listing.ticker,
+    requested_symbol=provider_symbol,
     full_history=full_history,
     requested_start_date=start_date,
     requested_end_date=end_date,
@@ -119,7 +142,7 @@ def import_alpha_vantage_daily_prices(
         # -------------------------------------------------
 
         raw_response = provider.fetch_daily_response(
-            symbol=listing.ticker,
+            symbol=provider_symbol,
             full_history=full_history,
         )
 
@@ -131,7 +154,7 @@ def import_alpha_vantage_daily_prices(
             ingestion_run_id=ingestion_run.id,
             provider_name=provider.provider_name,
             dataset_name=ALPHA_VANTAGE_DAILY_DATASET,
-            symbol=listing.ticker,
+            symbol=provider_symbol,
             body=raw_response.body,
         )
 

@@ -2,6 +2,7 @@ import uuid
 from datetime import (
     datetime,
     timezone,
+    date,
 )
 
 from sqlalchemy import select
@@ -28,6 +29,9 @@ from app.market_data.service import (
 from app.providers.alpha_vantage import (
     AlphaVantageProvider,
 )
+from app.identity.resolution_service import (
+    resolve_provider_symbol,
+)
 
 
 SPLITS_DATASET = "SPLITS"
@@ -49,6 +53,20 @@ def import_alpha_vantage_splits(
             "Listing does not exist."
         )
 
+    provider_symbol = (
+        resolve_provider_symbol(
+            database=database,
+
+            listing_id=listing.id,
+
+            provider_name=
+                "alpha_vantage",
+
+            as_of_date=
+                date.today(),
+        )
+    )
+
     provider = AlphaVantageProvider()
 
     source = get_or_create_data_source(
@@ -62,7 +80,7 @@ def import_alpha_vantage_splits(
     ingestion_run = IngestionRun(
         source_id=source.id,
         listing_id=listing.id,
-        requested_symbol=listing.ticker,
+        requested_symbol=provider_symbol,
         full_history=True,
         status="running",
     )
@@ -79,7 +97,7 @@ def import_alpha_vantage_splits(
     try:
         raw_response = (
             provider.fetch_splits_response(
-                listing.ticker
+                provider_symbol
             )
         )
 
@@ -94,7 +112,7 @@ def import_alpha_vantage_splits(
                 SPLITS_DATASET,
 
             symbol=
-                listing.ticker,
+                provider_symbol,
 
             body=
                 raw_response.body,
@@ -235,7 +253,7 @@ def import_alpha_vantage_splits(
                 SPLITS_DATASET,
 
             "symbol":
-                listing.ticker,
+                provider_symbol,
 
             "status":
                 ingestion_run.status,
@@ -295,6 +313,20 @@ listing_id: uuid.UUID,
             "Listing does not exist."
         )
 
+    provider_symbol = (
+    resolve_provider_symbol(
+        database=database,
+
+        listing_id=listing.id,
+
+        provider_name=
+            "alpha_vantage",
+
+        as_of_date=
+            date.today(),
+    )
+    )
+
     provider = AlphaVantageProvider()
 
     source = get_or_create_data_source(
@@ -308,7 +340,7 @@ listing_id: uuid.UUID,
     ingestion_run = IngestionRun(
         source_id=source.id,
         listing_id=listing.id,
-        requested_symbol=listing.ticker,
+        requested_symbol=provider_symbol,
         full_history=True,
         status="running",
     )
@@ -325,7 +357,7 @@ listing_id: uuid.UUID,
     try:
         raw_response = (
             provider.fetch_dividends_response(
-                listing.ticker
+                provider_symbol
             )
         )
 
@@ -340,7 +372,7 @@ listing_id: uuid.UUID,
                 DIVIDENDS_DATASET,
 
             symbol=
-                listing.ticker,
+                provider_symbol,
 
             body=
                 raw_response.body,
@@ -503,7 +535,7 @@ listing_id: uuid.UUID,
                 DIVIDENDS_DATASET,
 
             "symbol":
-                listing.ticker,
+                provider_symbol,
 
             "status":
                 ingestion_run.status,

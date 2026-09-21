@@ -19,6 +19,10 @@ from app.identity.resolution_schemas import (
     ListingProviderSymbolRead,
     SecurityIdentifierCreate,
     SecurityIdentifierRead,
+    CompanyRelationshipCreate,
+    CompanyRelationshipRead,
+    ListingLifecycleEventCreate,
+    ListingLifecycleEventRead,
 )
 from app.identity.resolution_service import (
     add_company_alias,
@@ -30,6 +34,10 @@ from app.identity.resolution_service import (
     resolve_company_identifier,
     resolve_provider_symbol,
     resolve_security_identifier,
+    add_company_relationship,
+    add_listing_lifecycle_event,
+    get_company_relationships,
+    get_listing_lifecycle_events,
 )
 
 
@@ -281,6 +289,113 @@ def read_provider_symbol(
             "symbol":
                 symbol,
         }
+
+    except LookupError as error:
+        raise HTTPException(
+            status_code=404,
+            detail=str(error),
+        )
+
+@router.post(
+"/company-relationships",
+response_model=
+    CompanyRelationshipRead,
+)
+def create_company_relationship(
+    payload:
+        CompanyRelationshipCreate,
+    database: DatabaseSession,
+):
+    try:
+        return add_company_relationship(
+            database=database,
+            payload=payload,
+        )
+
+    except LookupError as error:
+        raise HTTPException(
+            status_code=404,
+            detail=str(error),
+        )
+
+    except ValueError as error:
+        raise HTTPException(
+            status_code=422,
+            detail=str(error),
+        )
+
+
+@router.get(
+    "/companies/{company_id}/relationships",
+    response_model=list[
+        CompanyRelationshipRead
+    ],
+)
+def read_company_relationships(
+    company_id: uuid.UUID,
+    database: DatabaseSession,
+):
+    try:
+        return get_company_relationships(
+            database=database,
+            company_id=company_id,
+        )
+
+    except LookupError as error:
+        raise HTTPException(
+            status_code=404,
+            detail=str(error),
+        )
+
+
+@router.post(
+    "/listing-events",
+    response_model=
+        ListingLifecycleEventRead,
+)
+def create_listing_event(
+    payload:
+        ListingLifecycleEventCreate,
+    database: DatabaseSession,
+):
+    try:
+        return (
+            add_listing_lifecycle_event(
+                database=database,
+                payload=payload,
+            )
+        )
+
+    except LookupError as error:
+        raise HTTPException(
+            status_code=404,
+            detail=str(error),
+        )
+
+    except ValueError as error:
+        raise HTTPException(
+            status_code=422,
+            detail=str(error),
+        )
+
+
+@router.get(
+    "/listings/{listing_id}/events",
+    response_model=list[
+        ListingLifecycleEventRead
+    ],
+)
+def read_listing_events(
+    listing_id: uuid.UUID,
+    database: DatabaseSession,
+):
+    try:
+        return (
+            get_listing_lifecycle_events(
+                database=database,
+                listing_id=listing_id,
+            )
+        )
 
     except LookupError as error:
         raise HTTPException(

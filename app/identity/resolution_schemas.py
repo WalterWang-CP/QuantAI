@@ -235,3 +235,162 @@ class ListingProviderSymbolRead(
     valid_to: date | None
 
     created_at: datetime
+
+class CompanyRelationshipCreate(
+    BaseModel
+):
+    source_company_id: uuid.UUID
+    target_company_id: uuid.UUID
+
+    relationship_type: str = Field(
+        min_length=1,
+        max_length=40,
+    )
+
+    effective_date: date
+    known_date: date
+
+    note: str | None = None
+
+    @field_validator(
+        "relationship_type"
+    )
+    @classmethod
+    def normalize_relationship_type(
+        cls,
+        value: str,
+    ) -> str:
+        return (
+            value
+            .strip()
+            .lower()
+        )
+
+    @model_validator(
+        mode="after"
+    )
+    def validate_companies(self):
+        if (
+            self.source_company_id
+            == self.target_company_id
+        ):
+            raise ValueError(
+                "A company cannot have "
+                "a lifecycle relationship "
+                "with itself."
+            )
+
+        return self
+
+
+class CompanyRelationshipRead(
+    BaseModel
+):
+    model_config = ConfigDict(
+        from_attributes=True,
+    )
+
+    id: uuid.UUID
+
+    source_company_id: uuid.UUID
+    target_company_id: uuid.UUID
+
+    source_id: uuid.UUID
+
+    relationship_type: str
+
+    effective_date: date
+    known_date: date
+
+    note: str | None
+
+    created_at: datetime
+
+
+class ListingLifecycleEventCreate(
+    BaseModel
+):
+    listing_id: uuid.UUID
+
+    successor_listing_id: uuid.UUID | None = None
+
+    event_type: str = Field(
+        min_length=1,
+        max_length=40,
+    )
+
+    effective_date: date
+    known_date: date
+
+    note: str | None = None
+
+    @field_validator(
+        "event_type"
+    )
+    @classmethod
+    def normalize_event_type(
+        cls,
+        value: str,
+    ) -> str:
+        return (
+            value
+            .strip()
+            .lower()
+        )
+
+    @model_validator(
+        mode="after"
+    )
+    def validate_successor(self):
+        if (
+            self.successor_listing_id
+            == self.listing_id
+        ):
+            raise ValueError(
+                "successor_listing_id "
+                "cannot equal listing_id."
+            )
+
+        transition_types = {
+            "ticker_change",
+            "exchange_change",
+            "relisting",
+        }
+
+        if (
+            self.event_type
+            in transition_types
+            and self.successor_listing_id
+            is None
+        ):
+            raise ValueError(
+                f"{self.event_type} requires "
+                "a successor_listing_id."
+            )
+
+        return self
+
+
+class ListingLifecycleEventRead(
+    BaseModel
+):
+    model_config = ConfigDict(
+        from_attributes=True,
+    )
+
+    id: uuid.UUID
+
+    listing_id: uuid.UUID
+
+    successor_listing_id: uuid.UUID | None
+
+    source_id: uuid.UUID
+
+    event_type: str
+
+    effective_date: date
+    known_date: date
+
+    note: str | None
+
+    created_at: datetime
