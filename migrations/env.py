@@ -12,6 +12,7 @@ from app.db.models import (
     fundamentals,
     fx,
     identity,
+    identity_resolution,
     market_cap,
     market_data,
     retrieval,

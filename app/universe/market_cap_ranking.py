@@ -359,11 +359,11 @@ def build_market_cap_ranking_snapshot(
 
         status="draft",
 
-        candidate_count=
-            candidates_found,
+        candidate_count=candidates_found,
 
-        ranked_company_count=
-            len(candidates),
+        ranked_company_count=len(
+            candidates
+        ),
 
         minimum_required_candidates=
             minimum_candidates,
