@@ -16,14 +16,6 @@ from app.identity.resolution_schemas import (
     ListingProviderSymbolCreate,
     SecurityIdentifierCreate,
 )
-from app.identity.resolution_service import (
-    add_company_identifier,
-    add_listing_provider_symbol,
-    add_security_identifier,
-    resolve_company_identifier,
-    resolve_provider_symbol,
-    resolve_security_identifier,
-)
 from app.identity.resolution_schemas import (
     CompanyIdentifierCreate,
     CompanyRelationshipCreate,
@@ -42,6 +34,8 @@ from app.identity.resolution_service import (
     resolve_company_identifier,
     resolve_provider_symbol,
     resolve_security_identifier,
+    get_company_primary_listings,
+    get_provider_symbol_segments,
 )
 
 def create_database():
@@ -543,3 +537,319 @@ def test_provider_symbol_respects_validity():
     assert old_symbol == "OLD"
 
     assert new_symbol == "NEW"
+
+
+def test_provider_symbol_segments_split_history():
+    database = create_database()
+
+    _, _, listing = create_identity(
+        database
+    )
+
+    add_listing_provider_symbol(
+        database=database,
+
+        payload=
+            ListingProviderSymbolCreate(
+                listing_id=
+                    listing.id,
+
+                provider_name=
+                    "alpha_vantage",
+
+                symbol="OLD",
+
+                valid_from=date(
+                    2020,
+                    1,
+                    1,
+                ),
+
+                valid_to=date(
+                    2023,
+                    12,
+                    31,
+                ),
+            ),
+    )
+
+    add_listing_provider_symbol(
+        database=database,
+
+        payload=
+            ListingProviderSymbolCreate(
+                listing_id=
+                    listing.id,
+
+                provider_name=
+                    "alpha_vantage",
+
+                symbol="NEW",
+
+                valid_from=date(
+                    2024,
+                    1,
+                    1,
+                ),
+
+                valid_to=None,
+            ),
+    )
+
+    segments = (
+        get_provider_symbol_segments(
+            database=database,
+
+            listing_id=
+                listing.id,
+
+            provider_name=
+                "alpha_vantage",
+
+            start_date=date(
+                2022,
+                1,
+                1,
+            ),
+
+            end_date=date(
+                2025,
+                1,
+                1,
+            ),
+        )
+    )
+
+    assert len(segments) == 2
+
+    assert (
+        segments[0].symbol
+        == "OLD"
+    )
+
+    assert (
+        segments[0].start_date
+        == date(
+            2022,
+            1,
+            1,
+        )
+    )
+
+    assert (
+        segments[0].end_date
+        == date(
+            2023,
+            12,
+            31,
+        )
+    )
+
+    assert (
+        segments[1].symbol
+        == "NEW"
+    )
+
+    assert (
+        segments[1].start_date
+        == date(
+            2024,
+            1,
+            1,
+        )
+    )
+
+    assert (
+        segments[1].end_date
+        == date(
+            2025,
+            1,
+            1,
+        )
+    )
+
+def test_provider_symbol_segments_use_ticker_for_gap():
+    database = create_database()
+
+    _, _, listing = create_identity(
+        database
+    )
+
+    add_listing_provider_symbol(
+        database=database,
+
+        payload=
+            ListingProviderSymbolCreate(
+                listing_id=
+                    listing.id,
+
+                provider_name=
+                    "alpha_vantage",
+
+                symbol="OLD",
+
+                valid_from=date(
+                    2023,
+                    1,
+                    1,
+                ),
+
+                valid_to=date(
+                    2023,
+                    12,
+                    31,
+                ),
+            ),
+    )
+
+    add_listing_provider_symbol(
+        database=database,
+
+        payload=
+            ListingProviderSymbolCreate(
+                listing_id=
+                    listing.id,
+
+                provider_name=
+                    "alpha_vantage",
+
+                symbol="NEW",
+
+                valid_from=date(
+                    2024,
+                    1,
+                    2,
+                ),
+
+                valid_to=None,
+            ),
+    )
+
+    segments = (
+        get_provider_symbol_segments(
+            database=database,
+
+            listing_id=
+                listing.id,
+
+            provider_name=
+                "alpha_vantage",
+
+            start_date=date(
+                2023,
+                12,
+                31,
+            ),
+
+            end_date=date(
+                2024,
+                1,
+                3,
+            ),
+        )
+    )
+
+    assert len(segments) == 3
+
+    assert (
+        segments[0].symbol
+        == "OLD"
+    )
+
+    assert (
+        segments[1].symbol
+        == listing.ticker
+    )
+
+    assert (
+        segments[1].start_date
+        == date(
+            2024,
+            1,
+            1,
+        )
+    )
+
+    assert (
+        segments[1].end_date
+        == date(
+            2024,
+            1,
+            1,
+        )
+    )
+
+    assert (
+        segments[2].symbol
+        == "NEW"
+    )
+
+
+def test_company_primary_listings_include_history():
+    database = create_database()
+
+    company, security, old_listing = (
+        create_identity(
+            database
+        )
+    )
+
+    old_listing.end_date = date(
+        2024,
+        6,
+        30,
+    )
+
+    new_listing = Listing(
+        security_id=
+            security.id,
+
+        ticker="NEW",
+
+        exchange_code=
+            "NASDAQ",
+
+        currency_code=
+            "USD",
+
+        start_date=date(
+            2024,
+            7,
+            1,
+        ),
+
+        is_primary=True,
+    )
+
+    database.add(
+        new_listing
+    )
+
+    database.commit()
+
+    listings = (
+        get_company_primary_listings(
+            database=database,
+
+            company_id=
+                company.id,
+
+            as_of_date=date(
+                2025,
+                1,
+                1,
+            ),
+        )
+    )
+
+    assert len(listings) == 2
+
+    assert (
+        listings[0].id
+        == old_listing.id
+    )
+
+    assert (
+        listings[1].id
+        == new_listing.id
+    )

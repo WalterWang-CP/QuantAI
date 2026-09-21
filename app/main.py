@@ -19,7 +19,7 @@ from app.identity.resolution_routes import router as identity_resolution_router
 app = FastAPI(
     title=settings.app_name,
     description="Point-in-time financial data and company universe platform",
-    version="0.18.0",
+    version="0.19.0",
 )
 
 
@@ -40,7 +40,7 @@ app.include_router(identity_resolution_router)
 def root():
     return {
         "application": settings.app_name,
-        "version": "0.18.0",
+        "version": "0.19.0",
         "status": "running",
     }
 

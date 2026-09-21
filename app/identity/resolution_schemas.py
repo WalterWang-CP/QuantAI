@@ -394,3 +394,12 @@ class ListingLifecycleEventRead(
     note: str | None
 
     created_at: datetime
+
+
+class ProviderSymbolSegmentRead(
+    BaseModel
+):
+    start_date: date
+    end_date: date
+
+    symbol: str

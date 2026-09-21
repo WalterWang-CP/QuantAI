@@ -23,6 +23,7 @@ from app.identity.resolution_schemas import (
     CompanyRelationshipRead,
     ListingLifecycleEventCreate,
     ListingLifecycleEventRead,
+    ProviderSymbolSegmentRead,
 )
 from app.identity.resolution_service import (
     add_company_alias,
@@ -38,6 +39,7 @@ from app.identity.resolution_service import (
     add_listing_lifecycle_event,
     get_company_relationships,
     get_listing_lifecycle_events,
+    get_provider_symbol_segments,
 )
 
 
@@ -400,5 +402,50 @@ def read_listing_events(
     except LookupError as error:
         raise HTTPException(
             status_code=404,
+            detail=str(error),
+        )
+
+
+@router.get(
+    "/listings/{listing_id}/provider-symbol-segments",
+    response_model=list[
+        ProviderSymbolSegmentRead
+    ],
+)
+def read_provider_symbol_segments(
+    listing_id: uuid.UUID,
+    provider_name: str,
+    start_date: date,
+    end_date: date,
+    database: DatabaseSession,
+):
+    try:
+        return (
+            get_provider_symbol_segments(
+                database=database,
+
+                listing_id=
+                    listing_id,
+
+                provider_name=
+                    provider_name,
+
+                start_date=
+                    start_date,
+
+                end_date=
+                    end_date,
+            )
+        )
+
+    except LookupError as error:
+        raise HTTPException(
+            status_code=404,
+            detail=str(error),
+        )
+
+    except ValueError as error:
+        raise HTTPException(
+            status_code=422,
             detail=str(error),
         )

@@ -1,5 +1,6 @@
 import uuid
-from datetime import date
+from dataclasses import dataclass
+from datetime import date, timedelta
 
 from sqlalchemy import (
     and_,
@@ -32,10 +33,13 @@ from app.identity.resolution_schemas import (
 
 
 IDENTITY_EVENT_PROVIDER = "manual"
+IDENTITY_EVENT_DATASET = "IDENTITY_EVENTS"
 
-IDENTITY_EVENT_DATASET = (
-    "IDENTITY_EVENTS"
-)
+@dataclass(frozen=True)
+class ProviderSymbolSegment:
+    start_date: date
+    end_date: date
+    symbol: str
 
 def valid_as_of(
     model,
@@ -465,6 +469,74 @@ def add_listing_provider_symbol(
 
     return symbol
 
+def _select_active_provider_symbol(
+    mappings: list[
+        ListingProviderSymbol
+    ],
+    as_of_date: date,
+) -> ListingProviderSymbol | None:
+    active = []
+
+    for mapping in mappings:
+        if (
+            mapping.valid_from is not None
+            and mapping.valid_from
+            > as_of_date
+        ):
+            continue
+
+        if (
+            mapping.valid_to is not None
+            and mapping.valid_to
+            < as_of_date
+        ):
+            continue
+
+        active.append(
+            mapping
+        )
+
+    if not active:
+        return None
+
+    latest_start = max(
+        (
+            mapping.valid_from
+            or date.min
+        )
+        for mapping in active
+    )
+
+    preferred = [
+        mapping
+        for mapping in active
+        if (
+            mapping.valid_from
+            or date.min
+        )
+        == latest_start
+    ]
+
+    symbols = {
+        mapping.symbol
+        for mapping in preferred
+    }
+
+    if len(symbols) > 1:
+        raise ValueError(
+            "Ambiguous provider-symbol "
+            "mapping: multiple active "
+            "symbols have the same "
+            "valid_from date."
+        )
+
+    preferred.sort(
+        key=lambda mapping:
+            str(mapping.id)
+    )
+
+    return preferred[0]
+
 def resolve_provider_symbol(
     database: Session,
     listing_id: uuid.UUID,
@@ -490,182 +562,54 @@ def resolve_provider_symbol(
     if as_of_date is None:
         as_of_date = date.today()
 
-    statement = (
-        select(
-            ListingProviderSymbol
-        )
-        .where(
-            ListingProviderSymbol
-            .listing_id
-            == listing_id,
+    mappings = list(
+        database.scalars(
+            select(
+                ListingProviderSymbol
+            )
+            .where(
+                ListingProviderSymbol
+                .listing_id
+                == listing_id,
 
-            ListingProviderSymbol
-            .provider_name
-            == provider_name,
+                ListingProviderSymbol
+                .provider_name
+                == provider_name,
 
-            valid_as_of(
-                ListingProviderSymbol,
-                as_of_date,
-            ),
-        )
-        .order_by(
-            ListingProviderSymbol
-            .valid_from
-            .desc()
-            .nullslast(),
+                or_(
+                    ListingProviderSymbol
+                    .valid_from
+                    .is_(None),
 
-            ListingProviderSymbol
-            .created_at
-            .desc(),
+                    ListingProviderSymbol
+                    .valid_from
+                    <= as_of_date,
+                ),
+
+                or_(
+                    ListingProviderSymbol
+                    .valid_to
+                    .is_(None),
+
+                    ListingProviderSymbol
+                    .valid_to
+                    >= as_of_date,
+                ),
+            )
+        ).all()
+    )
+
+    mapping = (
+        _select_active_provider_symbol(
+            mappings=mappings,
+            as_of_date=as_of_date,
         )
     )
 
-    provider_symbol = (
-        database.scalar(
-            statement
-        )
-    )
-
-    if provider_symbol is not None:
-        return (
-            provider_symbol.symbol
-        )
+    if mapping is not None:
+        return mapping.symbol
 
     return listing.ticker
-
-IDENTITY_EVENT_PROVIDER = "manual"
-
-IDENTITY_EVENT_DATASET = (
-    "IDENTITY_EVENTS"
-)
-
-
-def add_company_relationship(
-    database: Session,
-    payload: CompanyRelationshipCreate,
-) -> CompanyRelationship:
-    from app.market_data.service import (
-    get_or_create_data_source,
-    )
-    source_company = database.get(
-        Company,
-        payload.source_company_id,
-    )
-
-    if source_company is None:
-        raise LookupError(
-            "Source company does not exist."
-        )
-
-    target_company = database.get(
-        Company,
-        payload.target_company_id,
-    )
-
-    if target_company is None:
-        raise LookupError(
-            "Target company does not exist."
-        )
-
-    allowed_relationships = {
-        "merged_into",
-        "acquired_by",
-        "spun_off_into",
-        "successor_of",
-    }
-
-    if (
-        payload.relationship_type
-        not in allowed_relationships
-    ):
-        raise ValueError(
-            "Unsupported company "
-            "relationship type."
-        )
-
-    source = get_or_create_data_source(
-        database=database,
-        provider_name=
-            IDENTITY_EVENT_PROVIDER,
-        dataset_name=
-            IDENTITY_EVENT_DATASET,
-    )
-
-    statement = select(
-        CompanyRelationship
-    ).where(
-        CompanyRelationship
-        .source_company_id
-        == payload.source_company_id,
-
-        CompanyRelationship
-        .target_company_id
-        == payload.target_company_id,
-
-        CompanyRelationship
-        .source_id
-        == source.id,
-
-        CompanyRelationship
-        .relationship_type
-        == payload.relationship_type,
-
-        CompanyRelationship
-        .effective_date
-        == payload.effective_date,
-    )
-
-    existing = database.scalar(
-        statement
-    )
-
-    if existing is not None:
-        existing.known_date = (
-            payload.known_date
-        )
-
-        existing.note = (
-            payload.note
-        )
-
-        database.commit()
-        database.refresh(existing)
-
-        return existing
-
-    relationship = CompanyRelationship(
-        source_company_id=
-            payload.source_company_id,
-
-        target_company_id=
-            payload.target_company_id,
-
-        source_id=
-            source.id,
-
-        relationship_type=
-            payload.relationship_type,
-
-        effective_date=
-            payload.effective_date,
-
-        known_date=
-            payload.known_date,
-
-        note=
-            payload.note,
-    )
-
-    database.add(
-        relationship
-    )
-
-    database.commit()
-    database.refresh(
-        relationship
-    )
-
-    return relationship
 
 
 def get_company_relationships(
@@ -902,3 +846,497 @@ def get_listing_lifecycle_events(
             statement
         ).all()
     )
+
+def get_provider_symbol_segments(
+    database: Session,
+    listing_id: uuid.UUID,
+    provider_name: str,
+    start_date: date,
+    end_date: date,
+) -> list[ProviderSymbolSegment]:
+    if end_date < start_date:
+        raise ValueError(
+            "end_date cannot be earlier "
+            "than start_date."
+        )
+
+    listing = database.get(
+        Listing,
+        listing_id,
+    )
+
+    if listing is None:
+        raise LookupError(
+            "Listing does not exist."
+        )
+
+    provider_name = (
+        provider_name
+        .strip()
+        .lower()
+    )
+
+    mappings = list(
+        database.scalars(
+            select(
+                ListingProviderSymbol
+            )
+            .where(
+                ListingProviderSymbol
+                .listing_id
+                == listing_id,
+
+                ListingProviderSymbol
+                .provider_name
+                == provider_name,
+
+                or_(
+                    ListingProviderSymbol
+                    .valid_from
+                    .is_(None),
+
+                    ListingProviderSymbol
+                    .valid_from
+                    <= end_date,
+                ),
+
+                or_(
+                    ListingProviderSymbol
+                    .valid_to
+                    .is_(None),
+
+                    ListingProviderSymbol
+                    .valid_to
+                    >= start_date,
+                ),
+            )
+        ).all()
+    )
+
+    boundaries = {
+        start_date,
+    }
+
+    for mapping in mappings:
+        if (
+            mapping.valid_from is not None
+            and start_date
+            < mapping.valid_from
+            <= end_date
+        ):
+            boundaries.add(
+                mapping.valid_from
+            )
+
+        if (
+            mapping.valid_to is not None
+            and start_date
+            <= mapping.valid_to
+            < end_date
+        ):
+            boundaries.add(
+                mapping.valid_to
+                + timedelta(days=1)
+            )
+
+    ordered_boundaries = sorted(
+        boundaries
+    )
+
+    segments = []
+
+    for index, segment_start in enumerate(
+        ordered_boundaries
+    ):
+        if (
+            index + 1
+            < len(
+                ordered_boundaries
+            )
+        ):
+            segment_end = (
+                ordered_boundaries[
+                    index + 1
+                ]
+                - timedelta(days=1)
+            )
+
+        else:
+            segment_end = end_date
+
+        active_mapping = (
+            _select_active_provider_symbol(
+                mappings=mappings,
+                as_of_date=
+                    segment_start,
+            )
+        )
+
+        if active_mapping is None:
+            symbol = listing.ticker
+
+        else:
+            symbol = (
+                active_mapping.symbol
+            )
+
+        if (
+            segments
+            and segments[-1].symbol
+            == symbol
+            and (
+                segments[-1].end_date
+                + timedelta(days=1)
+            )
+            == segment_start
+        ):
+            previous = segments[-1]
+
+            segments[-1] = (
+                ProviderSymbolSegment(
+                    start_date=
+                        previous.start_date,
+
+                    end_date=
+                        segment_end,
+
+                    symbol=
+                        previous.symbol,
+                )
+            )
+
+        else:
+            segments.append(
+                ProviderSymbolSegment(
+                    start_date=
+                        segment_start,
+
+                    end_date=
+                        segment_end,
+
+                    symbol=symbol,
+                )
+            )
+
+    return segments
+
+def get_company_primary_listings(
+    database: Session,
+    company_id: uuid.UUID,
+    as_of_date: date,
+) -> list[Listing]:
+    company = database.get(
+        Company,
+        company_id,
+    )
+
+    if company is None:
+        raise LookupError(
+            "Company does not exist."
+        )
+
+    statement = (
+        select(
+            Listing
+        )
+        .join(
+            Security,
+            Listing.security_id
+            == Security.id,
+        )
+        .where(
+            Security.company_id
+            == company_id,
+
+            Listing.is_primary
+            .is_(True),
+
+            Listing.start_date
+            <= as_of_date,
+        )
+        .order_by(
+            Listing.start_date,
+            Listing.id,
+        )
+    )
+
+    return list(
+        database.scalars(
+            statement
+        ).all()
+    )
+
+def add_company_relationship(
+    database: Session,
+    payload: CompanyRelationshipCreate,
+) -> CompanyRelationship:
+    from app.market_data.service import (
+        get_or_create_data_source,
+    )
+
+    source_company = database.get(
+        Company,
+        payload.source_company_id,
+    )
+
+    if source_company is None:
+        raise LookupError(
+            "Source company does not exist."
+        )
+
+    target_company = database.get(
+        Company,
+        payload.target_company_id,
+    )
+
+    if target_company is None:
+        raise LookupError(
+            "Target company does not exist."
+        )
+
+    if (
+        payload.source_company_id
+        == payload.target_company_id
+    ):
+        raise ValueError(
+            "A company cannot have a "
+            "lifecycle relationship "
+            "with itself."
+        )
+
+    allowed_relationships = {
+        "merged_into",
+        "acquired_by",
+        "spun_off_into",
+        "successor_of",
+    }
+
+    if (
+        payload.relationship_type
+        not in allowed_relationships
+    ):
+        raise ValueError(
+            "Unsupported company "
+            "relationship type."
+        )
+
+    source = get_or_create_data_source(
+        database=database,
+        provider_name=
+            IDENTITY_EVENT_PROVIDER,
+        dataset_name=
+            IDENTITY_EVENT_DATASET,
+    )
+
+    statement = select(
+        CompanyRelationship
+    ).where(
+        CompanyRelationship
+        .source_company_id
+        == payload.source_company_id,
+
+        CompanyRelationship
+        .target_company_id
+        == payload.target_company_id,
+
+        CompanyRelationship
+        .source_id
+        == source.id,
+
+        CompanyRelationship
+        .relationship_type
+        == payload.relationship_type,
+
+        CompanyRelationship
+        .effective_date
+        == payload.effective_date,
+    )
+
+    existing = database.scalar(
+        statement
+    )
+
+    if existing is not None:
+        existing.known_date = (
+            payload.known_date
+        )
+
+        existing.note = (
+            payload.note
+        )
+
+        database.commit()
+        database.refresh(existing)
+
+        return existing
+
+    relationship = CompanyRelationship(
+        source_company_id=
+            payload.source_company_id,
+
+        target_company_id=
+            payload.target_company_id,
+
+        source_id=
+            source.id,
+
+        relationship_type=
+            payload.relationship_type,
+
+        effective_date=
+            payload.effective_date,
+
+        known_date=
+            payload.known_date,
+
+        note=
+            payload.note,
+    )
+
+    database.add(
+        relationship
+    )
+
+    database.commit()
+    database.refresh(
+        relationship
+    )
+
+    return relationship
+def add_company_relationship(
+    database: Session,
+    payload: CompanyRelationshipCreate,
+) -> CompanyRelationship:
+    from app.market_data.service import (
+        get_or_create_data_source,
+    )
+
+    source_company = database.get(
+        Company,
+        payload.source_company_id,
+    )
+
+    if source_company is None:
+        raise LookupError(
+            "Source company does not exist."
+        )
+
+    target_company = database.get(
+        Company,
+        payload.target_company_id,
+    )
+
+    if target_company is None:
+        raise LookupError(
+            "Target company does not exist."
+        )
+
+    if (
+        payload.source_company_id
+        == payload.target_company_id
+    ):
+        raise ValueError(
+            "A company cannot have a "
+            "lifecycle relationship "
+            "with itself."
+        )
+
+    allowed_relationships = {
+        "merged_into",
+        "acquired_by",
+        "spun_off_into",
+        "successor_of",
+    }
+
+    if (
+        payload.relationship_type
+        not in allowed_relationships
+    ):
+        raise ValueError(
+            "Unsupported company "
+            "relationship type."
+        )
+
+    source = get_or_create_data_source(
+        database=database,
+        provider_name=
+            IDENTITY_EVENT_PROVIDER,
+        dataset_name=
+            IDENTITY_EVENT_DATASET,
+    )
+
+    statement = select(
+        CompanyRelationship
+    ).where(
+        CompanyRelationship
+        .source_company_id
+        == payload.source_company_id,
+
+        CompanyRelationship
+        .target_company_id
+        == payload.target_company_id,
+
+        CompanyRelationship
+        .source_id
+        == source.id,
+
+        CompanyRelationship
+        .relationship_type
+        == payload.relationship_type,
+
+        CompanyRelationship
+        .effective_date
+        == payload.effective_date,
+    )
+
+    existing = database.scalar(
+        statement
+    )
+
+    if existing is not None:
+        existing.known_date = (
+            payload.known_date
+        )
+
+        existing.note = (
+            payload.note
+        )
+
+        database.commit()
+        database.refresh(existing)
+
+        return existing
+
+    relationship = CompanyRelationship(
+        source_company_id=
+            payload.source_company_id,
+
+        target_company_id=
+            payload.target_company_id,
+
+        source_id=
+            source.id,
+
+        relationship_type=
+            payload.relationship_type,
+
+        effective_date=
+            payload.effective_date,
+
+        known_date=
+            payload.known_date,
+
+        note=
+            payload.note,
+    )
+
+    database.add(
+        relationship
+    )
+
+    database.commit()
+    database.refresh(
+        relationship
+    )
+
+    return relationship

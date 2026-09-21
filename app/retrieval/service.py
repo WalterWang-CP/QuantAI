@@ -29,7 +29,10 @@ from app.db.models.universe import (
 from app.market_data.coverage import (
     assess_daily_coverage,
 )
-
+from app.identity.resolution_service import (
+    get_company_primary_listings,
+    get_provider_symbol_segments,
+)
 
 PROVIDER_NAME = "alpha_vantage"
 DATASET_NAME = "TIME_SERIES_DAILY"
@@ -162,19 +165,39 @@ def plan_retrieval_jobs(
     already_covered = 0
     without_listing = 0
 
+    # =====================================
+    # Process each tracked company
+    # =====================================
+
     for decision in decisions:
-        listing = find_best_listing(
-            database=database,
-            company_id=decision.company_id,
-            as_of_date=snapshot.effective_date,
+        required_end = (
+            snapshot.effective_date
         )
 
-        if listing is None:
+        # ---------------------------------
+        # Find ALL historical primary
+        # listings for this company.
+        # ---------------------------------
+
+        primary_listings = (
+            get_company_primary_listings(
+                database=database,
+
+                company_id=
+                    decision.company_id,
+
+                as_of_date=
+                    required_end,
+            )
+        )
+
+        if not primary_listings:
             without_listing += 1
             continue
 
         # ---------------------------------
-        # Determine required research range
+        # Determine the company's requested
+        # historical start date.
         # ---------------------------------
 
         if (
@@ -183,189 +206,282 @@ def plan_retrieval_jobs(
             is not None
         ):
             required_start = (
-                decision.historical_backfill_start
+                decision
+                .historical_backfill_start
             )
 
-            reason = (
-                "Elite historical price backfill."
+            base_reason = (
+                "Elite historical price "
+                "backfill."
             )
 
         else:
-            required_start = (
+            required_start = min(
                 listing.start_date
+                for listing
+                in primary_listings
             )
 
-            reason = (
+            base_reason = (
                 "Tracked company historical "
                 "price coverage."
             )
 
-        # Never request data before this
-        # specific listing existed.
-        if (
-            required_start
-            < listing.start_date
-        ):
-            required_start = (
-                listing.start_date
+        # =================================
+        # Process every historical listing
+        # =================================
+
+        for listing in primary_listings:
+            # Clamp the company-level range
+            # to this listing's lifetime.
+
+            listing_start = max(
+                required_start,
+                listing.start_date,
             )
 
-        required_end = (
-            snapshot.effective_date
-        )
+            if listing.end_date is None:
+                listing_end = (
+                    required_end
+                )
 
-        # If the listing ended before the
-        # snapshot date, stop at the listing end.
-        if (
-            listing.end_date is not None
-            and listing.end_date
-            < required_end
-        ):
-            required_end = (
-                listing.end_date
+            else:
+                listing_end = min(
+                    required_end,
+                    listing.end_date,
+                )
+
+            # This listing does not overlap
+            # the requested research period.
+            if (
+                listing_start
+                > listing_end
+            ):
+                continue
+
+            # -----------------------------
+            # Calendar-aware coverage
+            # -----------------------------
+
+            coverage = (
+                assess_daily_coverage(
+                    database=database,
+
+                    listing_id=
+                        listing.id,
+
+                    provider_name=
+                        PROVIDER_NAME,
+
+                    dataset_name=
+                        DATASET_NAME,
+
+                    start_date=
+                        listing_start,
+
+                    end_date=
+                        listing_end,
+                )
             )
 
-        if (
-            required_start
-            > required_end
-        ):
-            without_listing += 1
-            continue
+            # Every expected exchange
+            # session already exists.
+            if (
+                coverage
+                .missing_session_count
+                == 0
+            ):
+                already_covered += 1
+                continue
 
-        # ---------------------------------
-        # Calendar-aware coverage analysis
-        # ---------------------------------
+            # Defensive check. Normally
+            # missing_session_count > 0
+            # means gaps is non-empty.
+            if not coverage.gaps:
+                continue
 
-        coverage = assess_daily_coverage(
-            database=database,
-            listing_id=listing.id,
-            provider_name=PROVIDER_NAME,
-            dataset_name=DATASET_NAME,
-            start_date=required_start,
-            end_date=required_end,
-        )
+            # -----------------------------
+            # Missing-data envelope
+            # -----------------------------
 
-        # Every expected exchange session
-        # is already present.
-        if (
-            coverage.missing_session_count
-            == 0
-        ):
-            already_covered += 1
-            continue
-
-        # ---------------------------------
-        # Determine actual missing range
-        # ---------------------------------
-
-        first_gap = coverage.gaps[0]
-
-        last_gap = coverage.gaps[-1]
-
-        job_start_date = (
-            first_gap.start_date
-        )
-
-        job_end_date = (
-            last_gap.end_date
-        )
-
-        # ---------------------------------
-        # Decide compact vs full-history
-        # ---------------------------------
-
-        full_history = requires_full_history(
-            exchange_code=
-                listing.exchange_code,
-
-            missing_start_date=
-                job_start_date,
-        )
-
-        # Add useful audit information.
-        reason = (
-            f"{reason} "
-            f"Missing "
-            f"{coverage.missing_session_count} "
-            f"expected trading sessions "
-            f"across "
-            f"{len(coverage.gaps)} "
-            f"gap(s)."
-        )
-
-        if full_history:
-            reason += (
-                " Missing coverage extends "
-                "beyond the provider's "
-                "compact recent-data window."
+            first_gap = (
+                coverage.gaps[0]
             )
 
-        else:
-            reason += (
-                " Missing coverage is within "
-                "the provider's compact "
-                "recent-data window."
+            last_gap = (
+                coverage.gaps[-1]
             )
 
-        # ---------------------------------
-        # Avoid duplicate retrieval jobs
-        # ---------------------------------
+            missing_start = (
+                first_gap.start_date
+            )
 
-        existing_job_statement = select(
-            RetrievalJob
-        ).where(
-            RetrievalJob.tracking_run_id
-            == tracking_run_id,
+            missing_end = (
+                last_gap.end_date
+            )
 
-            RetrievalJob.listing_id
-            == listing.id,
+            # -----------------------------
+            # Split the missing range by
+            # historical provider symbol.
+            # -----------------------------
 
-            RetrievalJob.provider_name
-            == PROVIDER_NAME,
+            symbol_segments = (
+                get_provider_symbol_segments(
+                    database=database,
 
-            RetrievalJob.dataset_name
-            == DATASET_NAME,
+                    listing_id=
+                        listing.id,
 
-            RetrievalJob.required_start_date
-            == job_start_date,
+                    provider_name=
+                        PROVIDER_NAME,
 
-            RetrievalJob.required_end_date
-            == job_end_date,
-        )
+                    start_date=
+                        missing_start,
 
-        existing_job = database.scalar(
-            existing_job_statement
-        )
+                    end_date=
+                        missing_end,
+                )
+            )
 
-        if existing_job is not None:
-            jobs_existing += 1
-            continue
+            # =============================
+            # One job per symbol segment
+            # =============================
 
-        # ---------------------------------
-        # Create retrieval job
-        # ---------------------------------
+            for segment in symbol_segments:
+                full_history = (
+                    requires_full_history(
+                        exchange_code=
+                            listing
+                            .exchange_code,
 
-        job = RetrievalJob(
-            tracking_run_id=tracking_run_id,
-            company_id=decision.company_id,
-            listing_id=listing.id,
+                        missing_start_date=
+                            segment
+                            .start_date,
+                    )
+                )
 
-            provider_name=PROVIDER_NAME,
-            dataset_name=DATASET_NAME,
+                # -------------------------
+                # Human-readable audit
+                # reason.
+                # -------------------------
 
-            required_start_date=job_start_date,
-            required_end_date=job_end_date,
+                reason = (
+                    f"{base_reason} "
+                    f"Missing "
+                    f"{coverage.missing_session_count} "
+                    f"expected trading sessions "
+                    f"across "
+                    f"{len(coverage.gaps)} "
+                    f"gap(s). "
+                    f"Provider symbol: "
+                    f"{segment.symbol}. "
+                    f"Segment: "
+                    f"{segment.start_date} "
+                    f"through "
+                    f"{segment.end_date}."
+                )
 
-            full_history=full_history,
+                if full_history:
+                    reason += (
+                        " Missing coverage "
+                        "extends beyond the "
+                        "provider's compact "
+                        "recent-data window."
+                    )
 
-            status="pending",
+                else:
+                    reason += (
+                        " Missing coverage is "
+                        "within the provider's "
+                        "compact recent-data "
+                        "window."
+                    )
 
-            reason=reason,
-        )
+                # -------------------------
+                # Avoid duplicate jobs
+                # -------------------------
 
-        database.add(job)
+                existing_job_statement = (
+                    select(
+                        RetrievalJob
+                    )
+                    .where(
+                        RetrievalJob
+                        .tracking_run_id
+                        == tracking_run_id,
 
-        jobs_created += 1
+                        RetrievalJob
+                        .listing_id
+                        == listing.id,
+
+                        RetrievalJob
+                        .provider_name
+                        == PROVIDER_NAME,
+
+                        RetrievalJob
+                        .dataset_name
+                        == DATASET_NAME,
+
+                        RetrievalJob
+                        .required_start_date
+                        == segment.start_date,
+
+                        RetrievalJob
+                        .required_end_date
+                        == segment.end_date,
+                    )
+                )
+
+                existing_job = (
+                    database.scalar(
+                        existing_job_statement
+                    )
+                )
+
+                if (
+                    existing_job
+                    is not None
+                ):
+                    jobs_existing += 1
+                    continue
+
+                # -------------------------
+                # Create retrieval job
+                # -------------------------
+
+                job = RetrievalJob(
+                    tracking_run_id=
+                        tracking_run_id,
+
+                    company_id=
+                        decision.company_id,
+
+                    listing_id=
+                        listing.id,
+
+                    provider_name=
+                        PROVIDER_NAME,
+
+                    dataset_name=
+                        DATASET_NAME,
+
+                    required_start_date=
+                        segment.start_date,
+
+                    required_end_date=
+                        segment.end_date,
+
+                    full_history=
+                        full_history,
+
+                    status="pending",
+
+                    reason=reason,
+                )
+
+                database.add(job)
+
+                jobs_created += 1
 
     database.commit()
 
@@ -388,6 +504,7 @@ def plan_retrieval_jobs(
         "companies_without_listing":
             without_listing,
     }
+
 
 def requires_full_history(
     exchange_code: str,
