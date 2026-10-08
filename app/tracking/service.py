@@ -19,7 +19,7 @@ from app.universe.constants import (
     RECONSTRUCTED_MARKET_CAP_METRIC,
 )
 
-TRACKING_ENGINE_VERSION = "1.0"
+TRACKING_ENGINE_VERSION = "1.1"
 
 
 def subtract_years(
@@ -88,10 +88,36 @@ def get_tracking_decisions(
     )
 
 
+def create_tracking_input_hash(
+    snapshots: list[RankingSnapshot],
+    rankings_by_snapshot: dict[uuid.UUID, list[CompanyRanking]],
+) -> str:
+    """Fingerprint the eligible snapshots and ranks used for this replay."""
+    inputs = {
+        "snapshots": [
+            {
+                "id": str(snapshot.id),
+                "ranking_date": snapshot.ranking_date.isoformat(),
+                "effective_date": snapshot.effective_date.isoformat(),
+                "ranking_metric": snapshot.ranking_metric,
+                "base_currency": snapshot.base_currency,
+                "status": snapshot.status,
+                "rankings": [
+                    {"company_id": str(ranking.company_id), "rank": ranking.rank}
+                    for ranking in rankings_by_snapshot[snapshot.id]
+                ],
+            }
+            for snapshot in snapshots
+        ]
+    }
+    return create_policy_hash(inputs)
+
+
 def build_tracking_run(
     database: Session,
     snapshot_id: uuid.UUID,
 ) -> TrackingRun:
+    database.flush()
     target_snapshot = database.get(
         RankingSnapshot,
         snapshot_id,
@@ -101,20 +127,19 @@ def build_tracking_run(
         raise LookupError(
             "Ranking snapshot does not exist."
         )
-    
-    if (
-    target_snapshot.ranking_metric
-    == RECONSTRUCTED_MARKET_CAP_METRIC
-    and target_snapshot.status
-    != "approved"
-    ):
+
+    allowed_statuses = (
+        ("approved",)
+        if target_snapshot.ranking_metric == RECONSTRUCTED_MARKET_CAP_METRIC
+        else ("legacy", "approved")
+    )
+    if target_snapshot.status not in allowed_statuses:
         raise ValueError(
-            "Reconstructed market-cap "
-            "ranking snapshots must be "
-            "approved before tracking "
-            "decisions can be built."
+            "Ranking snapshots must be approved before tracking decisions "
+            "can be built. Legacy snapshots are supported only for "
+            "non-reconstructed ranking metrics."
         )
-    
+
     policy = get_active_policy()
 
     policy_json = policy.model_dump(
@@ -125,44 +150,42 @@ def build_tracking_run(
         policy_json
     )
 
-    existing_statement = select(
-        TrackingRun
-    ).where(
+    snapshots_statement = (
+        select(RankingSnapshot)
+        .where(
+            RankingSnapshot.ranking_metric == target_snapshot.ranking_metric,
+            RankingSnapshot.base_currency == target_snapshot.base_currency,
+            RankingSnapshot.effective_date <= target_snapshot.effective_date,
+            RankingSnapshot.status.in_(allowed_statuses),
+        )
+        .order_by(
+            RankingSnapshot.effective_date,
+            RankingSnapshot.ranking_date,
+            RankingSnapshot.id,
+        )
+    )
+    snapshots = list(database.scalars(snapshots_statement).all())
+    rankings_by_snapshot: dict[uuid.UUID, list[CompanyRanking]] = {
+        snapshot.id: [] for snapshot in snapshots
+    }
+    rankings_statement = (
+        select(CompanyRanking)
+        .where(CompanyRanking.snapshot_id.in_(rankings_by_snapshot))
+        .order_by(CompanyRanking.snapshot_id, CompanyRanking.company_id)
+    )
+    for ranking in database.scalars(rankings_statement):
+        rankings_by_snapshot[ranking.snapshot_id].append(ranking)
+
+    input_hash = create_tracking_input_hash(snapshots, rankings_by_snapshot)
+    existing_statement = select(TrackingRun).where(
         TrackingRun.snapshot_id == snapshot_id,
         TrackingRun.policy_hash == policy_hash,
-        TrackingRun.engine_version
-        == TRACKING_ENGINE_VERSION,
+        TrackingRun.engine_version == TRACKING_ENGINE_VERSION,
+        TrackingRun.input_hash == input_hash,
     )
-
-    existing_run = database.scalar(
-        existing_statement
-    )
-
+    existing_run = database.scalar(existing_statement)
     if existing_run is not None:
         return existing_run
-
-    snapshots_statement = (
-    select(RankingSnapshot)
-    .where(
-        RankingSnapshot.ranking_metric
-        == target_snapshot.ranking_metric,
-        RankingSnapshot.base_currency
-        == target_snapshot.base_currency,
-        RankingSnapshot.effective_date
-        <= target_snapshot.effective_date,
-    )
-    .order_by(
-        RankingSnapshot.effective_date,
-        RankingSnapshot.ranking_date,
-        RankingSnapshot.id,
-    )
-)
-
-    snapshots = list(
-        database.scalars(
-            snapshots_statement
-        ).all()
-    )
 
     company_states: dict[
         uuid.UUID,
@@ -172,19 +195,7 @@ def build_tracking_run(
     target_decisions = []
 
     for snapshot in snapshots:
-        rankings_statement = (
-            select(CompanyRanking)
-            .where(
-                CompanyRanking.snapshot_id
-                == snapshot.id
-            )
-        )
-
-        rankings = list(
-            database.scalars(
-                rankings_statement
-            ).all()
-        )
+        rankings = rankings_by_snapshot[snapshot.id]
 
         current_rankings = {
             ranking.company_id: ranking
@@ -374,6 +385,7 @@ def build_tracking_run(
         policy_hash=policy_hash,
         policy_json=policy_json,
         engine_version=TRACKING_ENGINE_VERSION,
+        input_hash=input_hash,
     )
 
     database.add(tracking_run)

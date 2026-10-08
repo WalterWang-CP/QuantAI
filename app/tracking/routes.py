@@ -52,6 +52,12 @@ def build_tracking(
             detail=str(error),
         )
 
+    except ValueError as error:
+        raise HTTPException(
+            status_code=400,
+            detail=str(error),
+        )
+
 
 @router.get(
     "/runs/{run_id}/decisions",

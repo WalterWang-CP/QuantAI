@@ -14,6 +14,7 @@ class TrackingRunRead(BaseModel):
     policy_name: str
     policy_hash: str
     engine_version: str
+    input_hash: str
     created_at: datetime
 
 

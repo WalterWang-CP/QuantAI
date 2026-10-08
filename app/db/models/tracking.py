@@ -44,6 +44,13 @@ class TrackingRun(Base):
         nullable=False,
     )
 
+    input_hash: Mapped[str] = mapped_column(
+        String(64),
+        nullable=False,
+        default="legacy",
+        server_default="legacy",
+    )
+
     policy_json: Mapped[dict] = mapped_column(
         JSON,
         nullable=False,
@@ -70,7 +77,8 @@ class TrackingRun(Base):
             "snapshot_id",
             "policy_hash",
             "engine_version",
-            name="uq_tracking_run",
+            "input_hash",
+            name="uq_tracking_run_inputs",
         ),
     )
 
