@@ -21,18 +21,22 @@ from app.db.models.retrieval import (
     RetrievalJobAttempt,
 )
 from app.db.models.tracking import TrackingRun
-from app.market_data.service import (
-    import_alpha_vantage_daily_prices,
-)
 from app.providers.errors import (
     ProviderRateLimitError,
     ProviderRequestError,
     ProviderTemporaryError,
     ProviderCapabilityError,
 )
+from app.providers.registry import (
+    execute_registered_retrieval,
+    get_provider_daily_budget,
+    get_provider_registration,
+    validate_retrieval_capability,
+)
 
-
-PROVIDER_NAME = "alpha_vantage"
+DEFAULT_PROVIDER_NAME = (
+    "alpha_vantage"
+)
 
 
 class ProviderBatchPaused(RuntimeError):
@@ -84,13 +88,11 @@ def next_utc_midnight() -> datetime:
 def provider_daily_budget(
     provider_name: str,
 ) -> int | None:
-    if provider_name == "alpha_vantage":
-        return (
-            settings
-            .alpha_vantage_batch_daily_budget
+    return (
+        get_provider_daily_budget(
+            provider_name
         )
-
-    return None
+    )
 
 
 def get_or_create_throttle_state(
@@ -145,19 +147,16 @@ def get_or_create_throttle_state(
 def validate_provider_capability(
     job: RetrievalJob,
 ) -> None:
-    if (
-        job.provider_name
-        == "alpha_vantage"
-        and job.full_history
-        and not settings
-        .alpha_vantage_full_history_enabled
-    ):
-        raise ProviderCapabilityError(
-            "This retrieval requires "
-            "full historical daily data, "
-            "but Alpha Vantage full-history "
-            "access is disabled in QuantAI."
-        )
+    validate_retrieval_capability(
+        provider_name=
+            job.provider_name,
+
+        dataset_name=
+            job.dataset_name,
+
+        full_history=
+            job.full_history,
+    )
 
 def get_provider_pause(
     database: Session,
@@ -432,12 +431,24 @@ def execute_retrieval_job(
 
     try:
         result = (
-            import_alpha_vantage_daily_prices(
+            execute_registered_retrieval(
                 database=database,
-                listing_id=job.listing_id,
-                full_history=job.full_history,
+
+                provider_name=
+                    job.provider_name,
+
+                dataset_name=
+                    job.dataset_name,
+
+                listing_id=
+                    job.listing_id,
+
+                full_history=
+                    job.full_history,
+
                 start_date=
                     job.required_start_date,
+
                 end_date=
                     job.required_end_date,
             )
@@ -586,6 +597,7 @@ def execute_retrieval_job(
 def recover_stale_running_jobs(
     database: Session,
     tracking_run_id: uuid.UUID,
+    provider_name: str = DEFAULT_PROVIDER_NAME,
 ) -> int:
     cutoff = (
         utc_now()
@@ -602,6 +614,7 @@ def recover_stale_running_jobs(
     ).where(
         RetrievalJob.tracking_run_id
         == tracking_run_id,
+        RetrievalJob.provider_name == provider_name,
         RetrievalJob.status
         == "running",
         or_(
@@ -719,6 +732,7 @@ def get_next_retry_time(
 def get_job_status_counts(
     database: Session,
     tracking_run_id: uuid.UUID,
+    provider_name: str = DEFAULT_PROVIDER_NAME,
 ) -> dict[str, int]:
     statement = (
         select(
@@ -729,7 +743,8 @@ def get_job_status_counts(
         )
         .where(
             RetrievalJob.tracking_run_id
-            == tracking_run_id
+            == tracking_run_id,
+            RetrievalJob.provider_name == provider_name,
         )
         .group_by(
             RetrievalJob.status
@@ -772,6 +787,7 @@ def run_batch_loop(
         database=database,
         tracking_run_id=
             batch.tracking_run_id,
+        provider_name=batch.provider_name,
     )
 
     while (
@@ -845,6 +861,7 @@ def run_batch_loop(
                 database=database,
                 tracking_run_id=
                     batch.tracking_run_id,
+                provider_name=batch.provider_name,
             )
 
             if counts["failed"] > 0:
@@ -962,6 +979,7 @@ def run_batch_loop(
         database=database,
         tracking_run_id=
             batch.tracking_run_id,
+        provider_name=batch.provider_name,
     )
 
     unfinished = (
@@ -993,6 +1011,9 @@ def create_retrieval_batch(
     database: Session,
     tracking_run_id: uuid.UUID,
     limit: int,
+    provider_name: str = (
+        DEFAULT_PROVIDER_NAME
+    ),
 ) -> RetrievalBatchRun:
     tracking_run = database.get(
         TrackingRun,
@@ -1004,9 +1025,11 @@ def create_retrieval_batch(
             "Tracking run does not exist."
         )
 
+    provider_name = get_provider_registration(provider_name).provider_name
+
     batch = RetrievalBatchRun(
         tracking_run_id=tracking_run_id,
-        provider_name=PROVIDER_NAME,
+        provider_name=provider_name,
         requested_limit=limit,
         status="running",
     )
@@ -1069,6 +1092,7 @@ def resume_retrieval_batch(
 def get_retrieval_progress(
     database: Session,
     tracking_run_id: uuid.UUID,
+    provider_name: str = DEFAULT_PROVIDER_NAME,
 ) -> dict:
     tracking_run = database.get(
         TrackingRun,
@@ -1080,9 +1104,12 @@ def get_retrieval_progress(
             "Tracking run does not exist."
         )
 
+    provider_name = get_provider_registration(provider_name).provider_name
+
     counts = get_job_status_counts(
         database,
         tracking_run_id,
+        provider_name=provider_name,
     )
 
     total = sum(
@@ -1121,13 +1148,13 @@ def get_retrieval_progress(
             tracking_run_id=
                 tracking_run_id,
             provider_name=
-                PROVIDER_NAME,
+                provider_name,
         )
     )
 
     state = get_or_create_throttle_state(
         database,
-        PROVIDER_NAME,
+        provider_name,
     )
 
     return {
@@ -1162,14 +1189,14 @@ def get_retrieval_progress(
             next_retry_at,
 
         "provider_name":
-            PROVIDER_NAME,
+            provider_name,
 
         "provider_requests_today":
             state.requests_today,
 
         "provider_daily_budget":
             provider_daily_budget(
-                PROVIDER_NAME
+                provider_name
             ),
 
         "provider_blocked_until":

@@ -160,6 +160,8 @@ def create_tracking_run_with_jobs(
 
 def successful_import(
     database,
+    provider_name,
+    dataset_name,
     listing_id,
     full_history,
     start_date=None,
@@ -187,7 +189,7 @@ def test_batch_completes_multiple_jobs(
 
     monkeypatch.setattr(
         executor,
-        "import_alpha_vantage_daily_prices",
+        "execute_registered_retrieval",
         successful_import,
     )
 
@@ -237,6 +239,8 @@ def test_rate_limit_pauses_and_resumes_batch(
 
     def rate_limited_import(
         database,
+        provider_name,
+        dataset_name,
         listing_id,
         full_history,
         start_date=None,
@@ -248,7 +252,7 @@ def test_rate_limit_pauses_and_resumes_batch(
 
     monkeypatch.setattr(
         executor,
-        "import_alpha_vantage_daily_prices",
+        "execute_registered_retrieval",
         rate_limited_import,
     )
 
@@ -323,7 +327,7 @@ def test_rate_limit_pauses_and_resumes_batch(
 
     monkeypatch.setattr(
         executor,
-        "import_alpha_vantage_daily_prices",
+        "execute_registered_retrieval",
         successful_import,
     )
 
@@ -367,6 +371,8 @@ def test_temporary_failure_retries(
 
     def temporary_failure(
         database,
+        provider_name,
+        dataset_name,
         listing_id,
         full_history,
         start_date=None,
@@ -378,7 +384,7 @@ def test_temporary_failure_retries(
 
     monkeypatch.setattr(
         executor,
-        "import_alpha_vantage_daily_prices",
+        "execute_registered_retrieval",
         temporary_failure,
     )
 
@@ -406,7 +412,7 @@ def test_temporary_failure_retries(
 
     monkeypatch.setattr(
         executor,
-        "import_alpha_vantage_daily_prices",
+        "execute_registered_retrieval",
         successful_import,
     )
 
@@ -503,7 +509,7 @@ def test_full_history_capability_failure(
 
     monkeypatch.setattr(
         executor,
-        "import_alpha_vantage_daily_prices",
+        "execute_registered_retrieval",
         should_not_be_called,
     )
 
@@ -525,3 +531,87 @@ def test_full_history_capability_failure(
         result.attempt_count
         == 0
     )
+
+def test_registered_provider_batch_and_progress_are_isolated(monkeypatch):
+    from dataclasses import replace
+
+    import app.providers.registry as registry
+
+    database = create_database()
+    tracking_run, jobs = create_tracking_run_with_jobs(database, job_count=3)
+    calls = []
+
+    def registered_importer(
+        database, listing_id, full_history, start_date=None, end_date=None
+    ):
+        calls.append(listing_id)
+        return {"ingestion_run_id": uuid.uuid4(), "status": "completed"}
+
+    dataset = replace(registry.ALPHA_VANTAGE_DAILY, importer=registered_importer)
+    provider = replace(
+        registry.ALPHA_VANTAGE,
+        provider_name="test_provider",
+        daily_budget=lambda: 20,
+        datasets={dataset.dataset_name: dataset},
+    )
+    monkeypatch.setitem(registry.PROVIDER_REGISTRY, "test_provider", provider)
+    jobs[0].provider_name = "test_provider"
+    jobs[1].status = "failed"
+    jobs[2].status = "running"
+    jobs[2].last_attempt_at = executor.utc_now() - timedelta(days=1)
+    database.commit()
+
+    batch = executor.create_retrieval_batch(
+        database=database,
+        tracking_run_id=tracking_run.id,
+        limit=1,
+        provider_name=" TEST_PROVIDER ",
+    )
+
+    assert batch.provider_name == "test_provider"
+    assert batch.status == "completed"
+    assert batch.jobs_completed == 1
+    assert calls == [jobs[0].listing_id]
+    assert database.get(RetrievalJob, jobs[1].id).status == "failed"
+    assert database.get(RetrievalJob, jobs[2].id).status == "running"
+
+    progress = executor.get_retrieval_progress(
+        database=database,
+        tracking_run_id=tracking_run.id,
+        provider_name=" TEST_PROVIDER ",
+    )
+    assert progress["provider_name"] == "test_provider"
+    assert progress["total_jobs"] == 1
+    assert progress["completed"] == 1
+    assert progress["failed"] == 0
+    assert progress["running"] == 0
+    assert progress["completion_percent"] == 100.0
+    assert progress["provider_requests_today"] == 1
+    assert progress["provider_daily_budget"] == 20
+
+    default_progress = executor.get_retrieval_progress(database, tracking_run.id)
+    assert default_progress["provider_name"] == "alpha_vantage"
+    assert default_progress["total_jobs"] == 2
+    assert default_progress["failed"] == 1
+    assert default_progress["running"] == 1
+    database.close()
+
+
+def test_unknown_provider_is_rejected_before_batch_creation():
+    import pytest
+    from sqlalchemy import func, select
+
+    from app.db.models.retrieval import RetrievalBatchRun
+    from app.providers.errors import ProviderCapabilityError
+
+    database = create_database()
+    tracking_run, _ = create_tracking_run_with_jobs(database, job_count=1)
+    with pytest.raises(ProviderCapabilityError, match="Provider is not registered"):
+        executor.create_retrieval_batch(
+            database=database,
+            tracking_run_id=tracking_run.id,
+            limit=1,
+            provider_name="unknown_provider",
+        )
+    assert database.scalar(select(func.count()).select_from(RetrievalBatchRun)) == 0
+    database.close()
