@@ -111,13 +111,11 @@ class RankingSnapshot(Base):
             "effective_date >= ranking_date",
             name="ck_ranking_snapshot_dates",
         ),
+        CheckConstraint(
+            "status IN ('legacy', 'draft', 'approved', 'rejected')",
+            name="ck_ranking_snapshot_status",
+        ),
     )
-
-    CheckConstraint(
-    "status IN "
-    "('legacy', 'draft', 'approved', 'rejected')",
-    name="ck_ranking_snapshot_status",
-    ),
 
 class CompanyRanking(Base):
     __tablename__ = "company_rankings"
