@@ -22,6 +22,7 @@ from app.market_cap.price_service import (
     find_historical_close,
 )
 from app.market_cap.shares_service import (
+    adjust_shares_to_price_date,
     find_known_shares_outstanding,
 )
 
@@ -106,8 +107,11 @@ def reconstruct_market_cap(
         price_bar.close_price
     )
 
-    share_count = Decimal(
-        shares.shares_outstanding
+    share_count = adjust_shares_to_price_date(
+        database=database,
+        observation=shares,
+        listing_id=listing.id,
+        price_date=price_bar.trading_date,
     )
 
     local_market_cap = (
