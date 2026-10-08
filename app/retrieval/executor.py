@@ -10,8 +10,11 @@ from sqlalchemy import (
     func,
     or_,
     select,
+    update,
 )
 from sqlalchemy.orm import Session
+from sqlalchemy.dialects.postgresql import insert as postgres_insert
+from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 
 from app.core.config import settings
 from app.db.models.retrieval import (
@@ -95,149 +98,99 @@ def provider_daily_budget(
     )
 
 
-def get_or_create_throttle_state(
+def _locked_throttle_state(
     database: Session,
     provider_name: str,
 ) -> ProviderThrottleState:
-    state = database.get(
-        ProviderThrottleState,
-        provider_name,
-    )
-
+    provider_name = get_provider_registration(provider_name).provider_name
+    dialect = database.get_bind().dialect.name
+    if dialect == "postgresql":
+        insert = postgres_insert
+    elif dialect == "sqlite":
+        insert = sqlite_insert
+    else:
+        raise ValueError("Retrieval coordination supports PostgreSQL and SQLite.")
     today = utc_now().date()
-
-    if state is None:
-        state = ProviderThrottleState(
-            provider_name=provider_name,
-            quota_date=today,
-            requests_today=0,
-        )
-
-        database.add(state)
-        database.commit()
-        database.refresh(state)
-
-        return state
-
+    database.execute(
+        insert(ProviderThrottleState)
+        .values(provider_name=provider_name, quota_date=today, requests_today=0)
+        .on_conflict_do_nothing(index_elements=["provider_name"])
+    )
+    state = database.scalar(
+        select(ProviderThrottleState)
+        .where(ProviderThrottleState.provider_name == provider_name)
+        .with_for_update()
+        .execution_options(populate_existing=True)
+    )
     if state.quota_date != today:
         state.quota_date = today
         state.requests_today = 0
         state.blocked_until = None
         state.block_reason = None
-
-        database.commit()
-        database.refresh(state)
-
-    blocked_until = ensure_utc(
-        state.blocked_until
-    )
-
-    if (
-        blocked_until is not None
-        and blocked_until <= utc_now()
-    ):
+    blocked_until = ensure_utc(state.blocked_until)
+    if blocked_until is not None and blocked_until <= utc_now():
         state.blocked_until = None
         state.block_reason = None
-
-        database.commit()
-        database.refresh(state)
-
     return state
 
-def validate_provider_capability(
-    job: RetrievalJob,
-) -> None:
+
+def get_or_create_throttle_state(
+    database: Session,
+    provider_name: str,
+) -> ProviderThrottleState:
+    state = _locked_throttle_state(database, provider_name)
+    database.commit()
+    database.refresh(state)
+    return state
+
+
+def validate_provider_capability(job: RetrievalJob) -> None:
     validate_retrieval_capability(
-        provider_name=
-            job.provider_name,
-
-        dataset_name=
-            job.dataset_name,
-
-        full_history=
-            job.full_history,
+        provider_name=job.provider_name,
+        dataset_name=job.dataset_name,
+        full_history=job.full_history,
     )
+
+
+def _pause_for_state(state: ProviderThrottleState) -> tuple[datetime | None, str | None]:
+    blocked_until = ensure_utc(state.blocked_until)
+    if blocked_until is not None and blocked_until > utc_now():
+        return blocked_until, state.block_reason
+    budget = provider_daily_budget(state.provider_name)
+    if budget is not None and state.requests_today >= budget:
+        state.blocked_until = next_utc_midnight()
+        state.block_reason = "Local daily provider safety budget reached."
+        return state.blocked_until, state.block_reason
+    return None, None
+
 
 def get_provider_pause(
     database: Session,
     provider_name: str,
-) -> tuple[
-    datetime | None,
-    str | None,
-]:
-    state = get_or_create_throttle_state(
-        database,
-        provider_name,
-    )
-
-    blocked_until = ensure_utc(
-        state.blocked_until
-    )
-
-    if (
-        blocked_until is not None
-        and blocked_until > utc_now()
-    ):
-        return (
-            blocked_until,
-            state.block_reason,
-        )
-
-    budget = provider_daily_budget(
-        provider_name
-    )
-
-    if (
-        budget is not None
-        and state.requests_today >= budget
-    ):
-        blocked_until = next_utc_midnight()
-
-        state.blocked_until = blocked_until
-
-        state.block_reason = (
-            "Local daily provider safety "
-            "budget reached."
-        )
-
-        database.commit()
-
-        return (
-            blocked_until,
-            state.block_reason,
-        )
-
-    return None, None
+) -> tuple[datetime | None, str | None]:
+    state = _locked_throttle_state(database, provider_name)
+    pause = _pause_for_state(state)
+    database.commit()
+    return pause
 
 
 def reserve_provider_request(
     database: Session,
     provider_name: str,
+    *,
+    commit: bool = True,
 ) -> None:
-    blocked_until, reason = (
-        get_provider_pause(
-            database,
-            provider_name,
-        )
-    )
-
+    state = _locked_throttle_state(database, provider_name)
+    blocked_until, reason = _pause_for_state(state)
     if blocked_until is not None:
-        raise ProviderBatchPaused(
-            reason
-            or "Provider is temporarily paused.",
-            blocked_until,
-        )
-
-    state = get_or_create_throttle_state(
-        database,
-        provider_name,
-    )
-
+        if commit:
+            database.commit()
+        raise ProviderBatchPaused(reason or "Provider is temporarily paused.", blocked_until)
     state.requests_today += 1
-
     state.last_request_at = utc_now()
-
-    database.commit()
+    database.flush()
+    if commit:
+        database.commit()
 
 
 def block_provider_after_rate_limit(
@@ -245,19 +198,11 @@ def block_provider_after_rate_limit(
     provider_name: str,
     reason: str,
 ) -> datetime:
-    state = get_or_create_throttle_state(
-        database,
-        provider_name,
-    )
-
+    state = _locked_throttle_state(database, provider_name)
     blocked_until = next_utc_midnight()
-
     state.blocked_until = blocked_until
-
     state.block_reason = reason
-
     database.commit()
-
     return blocked_until
 
 
@@ -280,6 +225,20 @@ def retry_delay_seconds(
     )
 
 
+def _lock_active_attempt(database: Session, job_id: uuid.UUID, attempt_id: uuid.UUID):
+    job = database.scalar(
+        select(RetrievalJob).where(RetrievalJob.id == job_id)
+        .with_for_update().execution_options(populate_existing=True)
+    )
+    attempt = database.get(RetrievalJobAttempt, attempt_id, populate_existing=True)
+    active = (
+        job is not None and attempt is not None
+        and job.status == "running" and attempt.status == "running"
+        and attempt.job_id == job.id and attempt.attempt_number == job.attempt_count
+    )
+    return job, attempt, active
+
+
 def finish_failed_attempt(
     database: Session,
     job_id: uuid.UUID,
@@ -289,18 +248,16 @@ def finish_failed_attempt(
     error_type: str,
     error_message: str,
     next_retry_at: datetime | None = None,
+    ingestion_run_id: uuid.UUID | None = None,
 ) -> RetrievalJob:
     now = utc_now()
 
-    job = database.get(
-        RetrievalJob,
-        job_id,
-    )
-
-    attempt = database.get(
-        RetrievalJobAttempt,
-        attempt_id,
-    )
+    job, attempt, active = _lock_active_attempt(database, job_id, attempt_id)
+    if not active:
+        database.rollback()
+        return job
+    if ingestion_run_id is not None:
+        job.ingestion_run_id = ingestion_run_id
 
     job.status = job_status
 
@@ -333,101 +290,80 @@ def execute_retrieval_job(
     batch_run_id: uuid.UUID | None = None,
     force: bool = False,
 ) -> RetrievalJob:
-    job = database.get(
-        RetrievalJob,
-        job_id,
-    )
-
+    job = database.get(RetrievalJob, job_id, populate_existing=True)
     if job is None:
-        raise LookupError(
-            "Retrieval job does not exist."
-        )
-
-    if job.status == "completed":
-        return job
-
-    if (
-        job.status == "failed"
-        and not force
-    ):
-        return job
-
+        raise LookupError("Retrieval job does not exist.")
     now = utc_now()
-
-    next_retry_at = ensure_utc(
-        job.next_retry_at
+    eligible = or_(
+        RetrievalJob.status == "pending",
+        and_(
+            RetrievalJob.status == "retry_wait",
+            or_(
+                RetrievalJob.next_retry_at.is_(None),
+                RetrievalJob.next_retry_at <= now,
+                force,
+            ),
+        ),
+        and_(RetrievalJob.status == "failed", force),
     )
-
-    if (
-        job.status == "retry_wait"
-        and next_retry_at is not None
-        and next_retry_at > now
-        and not force
-    ):
+    if job.status in {"completed", "running"}:
+        return job
+    if job.status == "failed" and not force:
+        return job
+    retry_at = ensure_utc(job.next_retry_at)
+    if job.status == "retry_wait" and retry_at is not None and retry_at > now and not force:
+        return job
+    try:
+        validate_provider_capability(job)
+    except ProviderCapabilityError as error:
+        database.execute(
+            update(RetrievalJob).where(RetrievalJob.id == job_id, eligible)
+            .values(status="failed", last_error_type="provider_capability",
+                    error_message=str(error), completed_at=now)
+            .execution_options(synchronize_session=False)
+        )
+        database.commit()
+        database.refresh(job)
         return job
 
     try:
-        validate_provider_capability(
-            job
-        )
-
-    except ProviderCapabilityError as error:
-        job.status = "failed"
-
-        job.last_error_type = (
-            "provider_capability"
-        )
-
-        job.error_message = str(
-            error
-        )
-
-        job.completed_at = utc_now()
-
-        database.commit()
+        claimed = database.execute(
+            update(RetrievalJob).where(RetrievalJob.id == job_id, eligible)
+            .values(
+                status="running", attempt_count=RetrievalJob.attempt_count + 1,
+                last_attempt_at=now, next_retry_at=None, error_message=None,
+                last_error_type=None, completed_at=None,
+                started_at=func.coalesce(RetrievalJob.started_at, now),
+            ).execution_options(synchronize_session=False)
+        ).rowcount
+        if claimed != 1:
+            database.rollback()
+            database.refresh(job)
+            return job
+        if batch_run_id is not None:
+            reserved_slot = database.execute(
+                update(RetrievalBatchRun).where(
+                    RetrievalBatchRun.id == batch_run_id,
+                    RetrievalBatchRun.attempts_started < RetrievalBatchRun.requested_limit,
+                ).values(attempts_started=RetrievalBatchRun.attempts_started + 1)
+                .execution_options(synchronize_session=False)
+            ).rowcount
+            if reserved_slot != 1:
+                database.rollback()
+                database.refresh(job)
+                return job
         database.refresh(job)
-
-        return job
-
-    reserve_provider_request(
-        database=database,
-        provider_name=job.provider_name,
-    )
-
-    job = database.get(
-        RetrievalJob,
-        job_id,
-    )
-
-    job.status = "running"
-
-    job.attempt_count += 1
-
-    job.last_attempt_at = now
-
-    job.next_retry_at = None
-
-    job.error_message = None
-
-    job.last_error_type = None
-
-    job.completed_at = None
-
-    if job.started_at is None:
-        job.started_at = now
-
-    attempt = RetrievalJobAttempt(
-        job_id=job.id,
-        batch_run_id=batch_run_id,
-        attempt_number=job.attempt_count,
-        status="running",
-        started_at=now,
-    )
-
-    database.add(attempt)
-
-    database.commit()
-    database.refresh(attempt)
+        reserve_provider_request(database, job.provider_name, commit=False)
+        attempt = RetrievalJobAttempt(
+            job_id=job.id, batch_run_id=batch_run_id,
+            attempt_number=job.attempt_count, status="running", started_at=now,
+        )
+        database.add(attempt)
+        database.commit()
+        database.refresh(attempt)
+    except Exception:
+        database.rollback()
+        raise
 
     try:
         result = (
@@ -454,19 +390,10 @@ def execute_retrieval_job(
             )
         )
 
-        job = database.get(
-            RetrievalJob,
-            job_id,
-        )
-
-        attempt = database.get(
-            RetrievalJobAttempt,
-            attempt.id,
-        )
-
-        job.ingestion_run_id = (
-            result["ingestion_run_id"]
-        )
+        job, attempt, active = _lock_active_attempt(database, job_id, attempt.id)
+        if not active:
+            database.rollback()
+            return job
 
         if result["status"] == "incomplete":
             should_retry = (
@@ -483,6 +410,7 @@ def execute_retrieval_job(
                 database=database,
                 job_id=job.id,
                 attempt_id=attempt.id,
+                ingestion_run_id=result["ingestion_run_id"],
                 job_status="retry_wait" if should_retry else "failed",
                 attempt_status="retry_wait" if should_retry else "failed",
                 error_type="incomplete_coverage",
@@ -498,6 +426,7 @@ def execute_retrieval_job(
                 database=database,
                 job_id=job.id,
                 attempt_id=attempt.id,
+                ingestion_run_id=result["ingestion_run_id"],
                 job_status="failed",
                 attempt_status="failed",
                 error_type="validation_failed",
@@ -509,6 +438,7 @@ def execute_retrieval_job(
 
         completed_at = utc_now()
 
+        job.ingestion_run_id = result["ingestion_run_id"]
         job.status = "completed"
 
         job.error_message = None
@@ -606,6 +536,7 @@ def execute_retrieval_job(
         )
 
     except Exception as error:
+        database.rollback()
         finish_failed_attempt(
             database=database,
             job_id=job.id,
@@ -624,60 +555,34 @@ def recover_stale_running_jobs(
     tracking_run_id: uuid.UUID,
     provider_name: str = DEFAULT_PROVIDER_NAME,
 ) -> int:
-    cutoff = (
-        utc_now()
-        - timedelta(
-            minutes=(
-                settings
-                .retrieval_stale_running_minutes
-            )
-        )
-    )
-
-    statement = select(
-        RetrievalJob
-    ).where(
-        RetrievalJob.tracking_run_id
-        == tracking_run_id,
-        RetrievalJob.provider_name == provider_name,
-        RetrievalJob.status
-        == "running",
-        or_(
-            RetrievalJob.last_attempt_at
-            .is_(None),
-
-            RetrievalJob.last_attempt_at
-            <= cutoff,
-        ),
-    )
-
-    jobs = list(
-        database.scalars(
-            statement
-        ).all()
-    )
-
     now = utc_now()
-
-    for job in jobs:
-        job.status = "retry_wait"
-
-        job.next_retry_at = now
-
-        job.last_error_type = (
-            "stale_running_recovered"
+    cutoff = now - timedelta(minutes=settings.retrieval_stale_running_minutes)
+    recovered = database.execute(
+        update(RetrievalJob).where(
+            RetrievalJob.tracking_run_id == tracking_run_id,
+            RetrievalJob.provider_name == provider_name,
+            RetrievalJob.status == "running",
+            or_(RetrievalJob.last_attempt_at.is_(None), RetrievalJob.last_attempt_at <= cutoff),
+        ).values(
+            status="retry_wait", next_retry_at=now, completed_at=None,
+            last_error_type="stale_running_recovered",
+            error_message="An abandoned execution was recovered for retry.",
+        ).returning(RetrievalJob.id, RetrievalJob.attempt_count)
+        .execution_options(synchronize_session=False)
+    ).all()
+    for job_id, attempt_number in recovered:
+        database.execute(
+            update(RetrievalJobAttempt).where(
+                RetrievalJobAttempt.job_id == job_id,
+                RetrievalJobAttempt.attempt_number <= attempt_number,
+                RetrievalJobAttempt.status == "running",
+            ).values(
+                status="failed", error_type="stale_running_recovered",
+                error_message="Attempt abandoned during stale-job recovery.", completed_at=now,
+            ).execution_options(synchronize_session=False)
         )
-
-        job.error_message = (
-            "A previous execution stopped "
-            "while this job was running. "
-            "The job was recovered for retry."
-        )
-
-    if jobs:
-        database.commit()
-
-    return len(jobs)
+    database.commit()
+    return len(recovered)
 
 
 def get_next_eligible_job(
@@ -719,6 +624,7 @@ def get_next_eligible_job(
             RetrievalJob.id,
         )
         .limit(1)
+        .execution_options(populate_existing=True)
     )
 
     return database.scalar(
@@ -792,6 +698,21 @@ def get_job_status_counts(
         counts[status] = count
 
     return counts
+
+
+def _synchronize_batch_counters(database: Session, batch: RetrievalBatchRun) -> None:
+    database.scalar(
+        select(RetrievalBatchRun).where(RetrievalBatchRun.id == batch.id)
+        .with_for_update().execution_options(populate_existing=True)
+    )
+    counts = dict(database.execute(
+        select(RetrievalJobAttempt.status, func.count(RetrievalJobAttempt.id))
+        .where(RetrievalJobAttempt.batch_run_id == batch.id)
+        .group_by(RetrievalJobAttempt.status)
+    ).all())
+    batch.jobs_completed = counts.get("completed", 0)
+    batch.retry_scheduled = counts.get("retry_wait", 0) + counts.get("rate_limited", 0)
+    batch.jobs_failed = counts.get("failed", 0)
 
 
 def run_batch_loop(
@@ -889,6 +810,14 @@ def run_batch_loop(
                 provider_name=batch.provider_name,
             )
 
+            if counts["running"] > 0 or counts["pending"] > 0:
+                batch.status = "waiting_running"
+                batch.stop_reason = "Waiting for jobs owned by other workers."
+                batch.completed_at = None
+                database.commit()
+                database.refresh(batch)
+                return batch
+
             if counts["failed"] > 0:
                 batch.status = (
                     "completed_with_failures"
@@ -956,17 +885,20 @@ def run_batch_loop(
             job.id,
         )
 
+        database.refresh(batch)
+        latest_attempt = database.scalar(select(RetrievalJobAttempt).where(
+            RetrievalJobAttempt.job_id == job.id,
+            RetrievalJobAttempt.attempt_number == job.attempt_count,
+        ))
         if (
-            job.attempt_count
-            > attempts_before
+            job.attempt_count <= attempts_before or latest_attempt is None
+            or latest_attempt.batch_run_id != batch.id
         ):
-            batch.attempts_started += 1
+            continue
 
-        if job.status == "completed":
-            batch.jobs_completed += 1
+        _synchronize_batch_counters(database, batch)
 
-        elif job.status == "retry_wait":
-            batch.retry_scheduled += 1
+        if job.status == "retry_wait":
 
             if job.last_error_type == (
                 "provider_rate_limit"
@@ -994,9 +926,6 @@ def run_batch_loop(
                 database.refresh(batch)
 
                 return batch
-
-        elif job.status == "failed":
-            batch.jobs_failed += 1
 
         database.commit()
 
