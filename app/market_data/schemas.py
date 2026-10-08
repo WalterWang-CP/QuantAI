@@ -33,6 +33,7 @@ class MarketDataImportResult(BaseModel):
     symbol: str
 
     status: str
+    error_message: str | None = None
 
     rows_received: int
     rows_inserted: int

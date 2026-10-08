@@ -442,6 +442,18 @@ def plan_retrieval_jobs(
                     existing_job
                     is not None
                 ):
+                    if existing_job.status == "completed":
+                        existing_job.status = "pending"
+                        existing_job.full_history = full_history
+                        existing_job.reason = reason
+                        existing_job.completed_at = None
+                        existing_job.next_retry_at = None
+                        existing_job.last_error_type = "incomplete_coverage"
+                        existing_job.error_message = (
+                            "This completed job was reopened because "
+                            "its required coverage is still incomplete."
+                        )
+
                     jobs_existing += 1
                     continue
 

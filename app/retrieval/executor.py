@@ -468,6 +468,31 @@ def execute_retrieval_job(
             result["ingestion_run_id"]
         )
 
+        if result["status"] == "incomplete":
+            should_retry = (
+                job.attempt_count < settings.retrieval_max_attempts
+            )
+            retry_at = None
+
+            if should_retry:
+                retry_at = utc_now() + timedelta(
+                    seconds=retry_delay_seconds(job.attempt_count)
+                )
+
+            return finish_failed_attempt(
+                database=database,
+                job_id=job.id,
+                attempt_id=attempt.id,
+                job_status="retry_wait" if should_retry else "failed",
+                attempt_status="retry_wait" if should_retry else "failed",
+                error_type="incomplete_coverage",
+                error_message=(
+                    result.get("error_message")
+                    or "Requested trading-session coverage is incomplete."
+                ),
+                next_retry_at=retry_at,
+            )
+
         if result["status"] != "completed":
             return finish_failed_attempt(
                 database=database,

@@ -367,7 +367,7 @@ def import_alpha_vantage_daily_prices(
                 updated += 1
 
         # -------------------------------------------------
-        # 8. Mark ingestion as completed
+        # 8. Check requested coverage before completing ingestion
         # -------------------------------------------------
 
         ingestion_run.rows_inserted = (
@@ -381,6 +381,43 @@ def import_alpha_vantage_daily_prices(
         ingestion_run.status = (
             "completed"
         )
+
+        ingestion_run.error_message = None
+        quality_issue_count = len(validation_issues)
+
+        if start_date is not None and end_date is not None:
+            database.flush()
+
+            coverage = assess_daily_coverage(
+                database=database,
+                listing_id=listing.id,
+                provider_name=provider.provider_name,
+                dataset_name=ALPHA_VANTAGE_DAILY_DATASET,
+                start_date=start_date,
+                end_date=end_date,
+            )
+
+            if coverage.missing_session_count > 0:
+                message = (
+                    f"Requested coverage is incomplete: "
+                    f"{coverage.missing_session_count} of "
+                    f"{coverage.expected_session_count} expected "
+                    f"trading sessions are missing between "
+                    f"{coverage.coverage_start_date} and "
+                    f"{coverage.coverage_end_date}."
+                )
+
+                ingestion_run.status = "incomplete"
+                ingestion_run.error_message = message
+
+                database.add(DataQualityIssue(
+                    ingestion_run_id=ingestion_run.id,
+                    listing_id=listing.id,
+                    severity="warning",
+                    rule_code="INCOMPLETE_COVERAGE",
+                    message=message,
+                ))
+                quality_issue_count += 1
 
         ingestion_run.completed_at = (
             datetime.now(
@@ -423,9 +460,10 @@ def import_alpha_vantage_daily_prices(
                 ingestion_run.rows_updated,
 
             "quality_issue_count":
-                len(
-                    validation_issues
-                ),
+                quality_issue_count,
+
+            "error_message":
+                ingestion_run.error_message,
 
             "raw_artifact_id":
                 raw_artifact.id,
