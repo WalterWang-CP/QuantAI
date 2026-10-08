@@ -9,6 +9,7 @@ from app.core.config import settings
 from app.db.database import Base
 from app.db.models import (
     corporate_actions,
+    filings,
     fundamentals,
     fx,
     identity,
