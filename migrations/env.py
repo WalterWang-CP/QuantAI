@@ -12,6 +12,7 @@ from app.db.models import (
     filings,
     share_normalization,
     share_scope,
+    sec_market_cap,
     fundamentals,
     fx,
     identity,

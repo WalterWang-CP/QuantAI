@@ -199,3 +199,42 @@ def reconstruct_batch(
         limit=
             payload.limit,
     )
+
+# SEC calculations have separate versioned storage and full captured input manifests.
+from fastapi import Query
+from sqlalchemy import select
+from app.db.models.sec_market_cap import SECMarketCapSnapshot
+from app.market_cap.sec_service import SECMarketCapRequest, SECMarketCapRead, reconstruct_sec_market_cap, snapshot_read
+from app.filings.share_selection import ShareSelectionConflict
+
+
+@router.post("/listings/{listing_id}/reconstruct-sec", response_model=SECMarketCapRead)
+def reconstruct_listing_sec_market_cap(listing_id: uuid.UUID, payload: SECMarketCapRequest, database: DatabaseSession):
+    try:
+        return reconstruct_sec_market_cap(database, listing_id, payload)
+    except LookupError as error:
+        raise HTTPException(404, detail=str(error)) from error
+    except (ShareSelectionConflict, ValueError) as error:
+        raise HTTPException(409, detail=str(error)) from error
+
+
+@router.get("/listings/{listing_id}/sec-snapshots", response_model=list[SECMarketCapRead])
+def read_sec_market_cap_history(listing_id: uuid.UUID, database: DatabaseSession,
+                                limit: int = Query(100, ge=1, le=500), offset: int = Query(0, ge=0)):
+    from app.db.models.identity import Listing
+    if database.get(Listing, listing_id) is None:
+        raise HTTPException(404, detail="Listing does not exist")
+    rows = database.scalars(select(SECMarketCapSnapshot).where(SECMarketCapSnapshot.listing_id == listing_id)
+        .order_by(SECMarketCapSnapshot.valuation_date, SECMarketCapSnapshot.created_at, SECMarketCapSnapshot.id)
+        .offset(offset).limit(limit))
+    return [snapshot_read(row) for row in rows]
+
+
+@router.get("/securities/{security_id}/listings")
+def read_sec_security_listings(security_id: uuid.UUID, database: DatabaseSession):
+    from app.db.models.identity import Listing, Security
+    from app.identity.schemas import ListingRead
+    if database.get(Security, security_id) is None:
+        raise HTTPException(404, detail="Security does not exist")
+    return [ListingRead.model_validate(row) for row in database.scalars(
+        select(Listing).where(Listing.security_id == security_id).order_by(Listing.start_date, Listing.id))]
