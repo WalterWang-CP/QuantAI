@@ -7,13 +7,16 @@ from sqlalchemy.orm import Session
 
 from app.db.database import get_db
 from app.db.models.filings import CompanyFiling, FilingSourceArtifact, RawFinancialFact
-from app.db.models.identity import Company
+from app.db.models.identity import Company, Security
+from app.identity.schemas import SecurityRead
 from app.filings.schemas import FilingRead, RawFactRead, SECImportRequest, SECImportResult
 from app.filings.sec_service import SECIdentityError, import_sec_company
 from app.filings.service import FilingConflictError
 from app.db.models.share_normalization import NormalizedShareFact
 from app.filings.share_normalization import (NormalizedShareRead, ShareNormalizationResult, normalize_company_shares)
 from datetime import date
+from app.db.models.share_scope import CompanyShareScope
+from app.filings.share_selection import (ShareScopeCreate, ShareScopeRead, SelectedShareRead, ShareSelectionConflict, create_share_scope, select_security_shares)
 from app.providers.errors import ProviderRateLimitError, ProviderRequestError, ProviderTemporaryError
 
 router = APIRouter(prefix="/filings", tags=["Filings"])
@@ -87,3 +90,39 @@ def list_normalized_shares(company_id: uuid.UUID, database: DatabaseSession,
             NormalizedShareFact.known_date <= as_of, NormalizedShareFact.observation_date <= as_of)
     return list(database.scalars(statement.order_by(NormalizedShareFact.observation_date,
         NormalizedShareFact.known_date, NormalizedShareFact.raw_fact_id).offset(offset).limit(limit)))
+
+
+@router.post("/companies/{company_id}/share-scope", response_model=ShareScopeRead)
+def register_share_scope(company_id: uuid.UUID, payload: ShareScopeCreate, database: DatabaseSession):
+    try:
+        return create_share_scope(database, company_id, payload)
+    except LookupError as error:
+        raise HTTPException(404, detail=str(error)) from error
+    except ShareSelectionConflict as error:
+        raise HTTPException(409, detail=str(error)) from error
+
+
+@router.get("/companies/{company_id}/share-scopes", response_model=list[ShareScopeRead])
+def read_share_scopes(company_id: uuid.UUID, database: DatabaseSession):
+    if database.get(Company, company_id) is None:
+        raise HTTPException(404, detail="Company does not exist")
+    return list(database.scalars(select(CompanyShareScope).where(CompanyShareScope.company_id == company_id)
+        .order_by(CompanyShareScope.valid_from, CompanyShareScope.id)))
+
+
+@router.get("/securities/{security_id}/selected-shares", response_model=SelectedShareRead)
+def read_selected_shares(security_id: uuid.UUID, valuation_date: date, database: DatabaseSession,
+                         max_age_days: int = Query(400, ge=1, le=3660)):
+    try:
+        return select_security_shares(database, security_id, valuation_date, max_age_days)
+    except LookupError as error:
+        raise HTTPException(404, detail=str(error)) from error
+    except ShareSelectionConflict as error:
+        raise HTTPException(409, detail=str(error)) from error
+
+
+@router.get("/companies/{company_id}/securities", response_model=list[SecurityRead])
+def read_company_securities(company_id: uuid.UUID, database: DatabaseSession):
+    if database.get(Company, company_id) is None:
+        raise HTTPException(404, detail="Company does not exist")
+    return list(database.scalars(select(Security).where(Security.company_id == company_id).order_by(Security.id)))

@@ -11,6 +11,7 @@ from app.db.models import (
     corporate_actions,
     filings,
     share_normalization,
+    share_scope,
     fundamentals,
     fx,
     identity,

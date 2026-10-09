@@ -1,4 +1,5 @@
 from app.db.models import corporate_actions
+from app.db.models import share_scope
 from app.db.models import share_normalization
 from app.db.models import filings
 from app.db.models import fundamentals
@@ -15,6 +16,7 @@ __all__ = [
     "corporate_actions",
     "filings",
     "share_normalization",
+    "share_scope",
     "fundamentals",
     "fx",
     "identity",
