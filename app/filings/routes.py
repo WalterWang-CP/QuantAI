@@ -11,6 +11,9 @@ from app.db.models.identity import Company
 from app.filings.schemas import FilingRead, RawFactRead, SECImportRequest, SECImportResult
 from app.filings.sec_service import SECIdentityError, import_sec_company
 from app.filings.service import FilingConflictError
+from app.db.models.share_normalization import NormalizedShareFact
+from app.filings.share_normalization import (NormalizedShareRead, ShareNormalizationResult, normalize_company_shares)
+from datetime import date
 from app.providers.errors import ProviderRateLimitError, ProviderRequestError, ProviderTemporaryError
 
 router = APIRouter(prefix="/filings", tags=["Filings"])
@@ -61,3 +64,26 @@ def download_artifact(artifact_id: uuid.UUID, database: DatabaseSession):
         raise HTTPException(404, detail="Artifact does not exist")
     return Response(content=artifact.body, media_type="application/octet-stream",
                     headers={"Content-Disposition": f'attachment; filename="{artifact.id}.json"'})
+
+
+@router.post("/companies/{company_id}/normalize-shares", response_model=ShareNormalizationResult)
+def normalize_shares(company_id: uuid.UUID, database: DatabaseSession):
+    try:
+        return normalize_company_shares(database, company_id)
+    except LookupError as error:
+        raise HTTPException(404, detail=str(error)) from error
+
+
+@router.get("/companies/{company_id}/normalized-shares", response_model=list[NormalizedShareRead])
+def list_normalized_shares(company_id: uuid.UUID, database: DatabaseSession,
+                           as_of: date | None = None,
+                           limit: int = Query(100, ge=1, le=500), offset: int = Query(0, ge=0)):
+    if database.get(Company, company_id) is None:
+        raise HTTPException(404, detail="Company does not exist")
+    statement = select(NormalizedShareFact).where(NormalizedShareFact.company_id == company_id)
+    if as_of is not None:
+        # All eligible filing versions, not a winner selected for market-cap calculation.
+        statement = statement.where(NormalizedShareFact.status == "accepted",
+            NormalizedShareFact.known_date <= as_of, NormalizedShareFact.observation_date <= as_of)
+    return list(database.scalars(statement.order_by(NormalizedShareFact.observation_date,
+        NormalizedShareFact.known_date, NormalizedShareFact.raw_fact_id).offset(offset).limit(limit)))
