@@ -63,9 +63,38 @@ def _fact_values(fact: RawFactCreate) -> dict:
     }
 
 
+def archive_filing_response(database, company_id, source_id, *, raw_body, source_url,
+                            content_type=None, fetched_at=None):
+    """Flush original bytes without committing; return (artifact_id, created)."""
+    if not isinstance(raw_body, bytes) or not raw_body:
+        raise ValueError("raw_body must contain nonempty original response bytes")
+    fetched_at = fetched_at or datetime.now(timezone.utc)
+    if fetched_at.tzinfo is None or fetched_at.utcoffset() is None:
+        raise ValueError("fetched_at must include a timezone")
+    if not source_url.strip():
+        raise ValueError("source_url must not be blank")
+    if content_type is not None and len(content_type) > 100:
+        raise ValueError("content_type cannot exceed 100 characters")
+    digest = hashlib.sha256(raw_body).hexdigest()
+    artifact_id = _insert(database, FilingSourceArtifact.__table__, {
+        "id": uuid.uuid4(), "company_id": company_id, "source_id": source_id,
+        "source_url": source_url, "content_type": content_type, "sha256": digest,
+        "body": raw_body, "byte_count": len(raw_body), "fetched_at": _utc(fetched_at),
+    }, ["company_id", "source_id", "sha256"])
+    if artifact_id is not None:
+        return artifact_id, True
+    artifact_id = database.scalar(select(FilingSourceArtifact.id).where(
+        FilingSourceArtifact.company_id == company_id,
+        FilingSourceArtifact.source_id == source_id,
+        FilingSourceArtifact.sha256 == digest,
+    ))
+    return artifact_id, False
+
+
 def store_filing(
     database: Session, payload: FilingCreate, *, raw_body: bytes,
     source_url: str, content_type: str | None = None, fetched_at: datetime | None = None,
+    artifact_id: uuid.UUID | None = None,
 ) -> FilingImportResult:
     """Flush an import without committing. Amendments have their own accession.
 
@@ -95,19 +124,20 @@ def store_filing(
         connection.exec_driver_sql("BEGIN")
 
     with database.begin_nested():
-        digest = hashlib.sha256(raw_body).hexdigest()
-        archive_id = _insert(database, FilingSourceArtifact.__table__, {
-            "id": uuid.uuid4(), "company_id": payload.company_id, "source_id": payload.source_id,
-            "source_url": source_url, "content_type": content_type, "sha256": digest,
-            "body": raw_body, "byte_count": len(raw_body), "fetched_at": fetched_at,
-        }, ["company_id", "source_id", "sha256"])
-        archive_created = archive_id is not None
-        if archive_id is None:
-            archive_id = database.scalar(select(FilingSourceArtifact.id).where(
-                FilingSourceArtifact.company_id == payload.company_id,
-                FilingSourceArtifact.source_id == payload.source_id,
-                FilingSourceArtifact.sha256 == digest,
-            ))
+        if artifact_id is None:
+            archive_id, archive_created = archive_filing_response(
+                database, payload.company_id, payload.source_id, raw_body=raw_body,
+                source_url=source_url, content_type=content_type, fetched_at=fetched_at,
+            )
+        else:
+            artifact = database.execute(select(
+                FilingSourceArtifact.company_id, FilingSourceArtifact.source_id, FilingSourceArtifact.sha256,
+            ).where(FilingSourceArtifact.id == artifact_id)).one_or_none()
+            if artifact is None or artifact.company_id != payload.company_id or artifact.source_id != payload.source_id:
+                raise ValueError("Artifact does not belong to this company and source")
+            if artifact.sha256 != hashlib.sha256(raw_body).hexdigest():
+                raise ValueError("Artifact does not match supplied response bytes")
+            archive_id, archive_created = artifact_id, False
         metadata = {name: getattr(payload, name) for name in (
             "company_id", "source_id", "cik", "accession_number", "form_type",
             "report_period", "filed_date", "accepted_at", "document_url",

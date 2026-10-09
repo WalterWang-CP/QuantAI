@@ -1,8 +1,10 @@
 from fastapi import FastAPI
+from fastapi.responses import JSONResponse
 from sqlalchemy import text
 
 from app.core.config import settings
 from app.db.database import engine
+from app.filings.routes import router as filings_router
 from app.policy.routes import router as policy_router
 from app.identity.routes import router as identity_router
 from app.universe.routes import router as universe_router
@@ -23,6 +25,7 @@ app = FastAPI(
 )
 
 
+app.include_router(filings_router)
 app.include_router(policy_router)
 app.include_router(identity_router)
 app.include_router(universe_router)
@@ -56,7 +59,10 @@ def health():
         }
 
     except Exception:
-        return {
-            "status": "degraded",
-            "database": "unhealthy",
-        }
+        return JSONResponse(
+            status_code=503,
+            content={
+                "status": "degraded",
+                "database": "unhealthy",
+            },
+        )
