@@ -17,7 +17,7 @@ from app.db.database import Base
 from app.db.models.universe import RankingSnapshot
 
 ROOT = Path(__file__).resolve().parents[1]
-HEAD = "8c3f1a6e9b42"
+HEAD = "a6d4e2c8f913"
 PREVIOUS = "6d4c9a21e8b7"
 
 
@@ -30,7 +30,7 @@ def migration_config():
 def test_migration_chain_has_one_expected_head():
     scripts = ScriptDirectory.from_config(migration_config())
     assert scripts.get_heads() == [HEAD]
-    assert scripts.get_revision(HEAD).down_revision == "7a2d6f9c4e81"
+    assert scripts.get_revision(HEAD).down_revision == "8c3f1a6e9b42"
     revisions = list(scripts.walk_revisions())
     assert sum(revision.down_revision is None for revision in revisions) == 1
 

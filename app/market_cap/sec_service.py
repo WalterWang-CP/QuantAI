@@ -10,6 +10,7 @@ from pydantic import BaseModel, ConfigDict, Field, HttpUrl
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from app.db.models.csv_prices import CSVPriceArtifact
 from app.db.models.corporate_actions import StockSplit
 from app.db.models.filings import FilingSourceArtifact, RawFinancialFact, CompanyFiling
 from app.db.models.identity import Company, Listing, Security
@@ -24,6 +25,7 @@ from app.market_cap.price_service import find_historical_close
 class SECMarketCapRequest(BaseModel):
     model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
     valuation_date: date
+    price_source_id: uuid.UUID | None = None
     max_share_age_days: int = Field(400, ge=1, le=3660)
     max_price_age_days: int = Field(7, ge=0, le=31)
     confirm_split_coverage: Literal[True]
@@ -72,7 +74,7 @@ def reconstruct_sec_market_cap(database: Session, listing_id: uuid.UUID, payload
         if listing.currency_code.strip().upper() != "USD":
             raise ShareSelectionConflict("This SEC reconstruction pilot supports USD listings only; explicit FX provenance is required for other currencies")
         selected = select_security_shares(database, security.id, payload.valuation_date, payload.max_share_age_days)
-        bar = find_historical_close(database, listing.id, payload.valuation_date)
+        bar = find_historical_close(database, listing.id, payload.valuation_date, source_id=payload.price_source_id)
         if bar.trading_date < listing.start_date or (payload.valuation_date - bar.trading_date).days > payload.max_price_age_days:
             raise ShareSelectionConflict("Selected price is outside the listing lifetime or exceeds max_price_age_days")
         mapping = database.get(CompanyShareScope, selected.mapping_id)
@@ -138,6 +140,12 @@ def reconstruct_sec_market_cap(database: Session, listing_id: uuid.UUID, payload
             "limits": {"max_share_age_days": payload.max_share_age_days, "max_price_age_days": payload.max_price_age_days},
             "result": {"shares_on_price_date": _text(shares), "local_market_cap": _text(market_cap), "market_cap_usd": _text(market_cap)},
         }
+        if price_archive.storage_path.startswith("database:csv_price_artifacts/"):
+            csv_archive = database.scalar(select(CSVPriceArtifact).where(CSVPriceArtifact.ingestion_run_id == bar.last_ingestion_run_id))
+            if csv_archive is None or csv_archive.sha256 != price_archive.sha256 or csv_archive.source_id != bar.source_id or csv_archive.listing_id != listing.id or hashlib.sha256(csv_archive.body).hexdigest() != csv_archive.sha256:
+                raise ShareSelectionConflict("CSV price archive is missing or mismatched")
+            manifest["price"]["csv_artifact_id"] = str(csv_archive.id)
+            manifest["price"]["csv_declaration"] = json.loads(csv_archive.declaration_json)
         encoded = json.dumps(manifest, sort_keys=True, separators=(",", ":"))
         fingerprint = hashlib.sha256(encoded.encode("utf-8")).hexdigest()
         snapshot_id = _insert(database, SECMarketCapSnapshot.__table__, dict(id=uuid.uuid4(),

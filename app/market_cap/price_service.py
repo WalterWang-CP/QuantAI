@@ -17,18 +17,18 @@ def find_historical_close(
     database: Session,
     listing_id: uuid.UUID,
     valuation_date: date,
+    source_id: uuid.UUID | None = None,
 ) -> DailyPriceBar:
-    source = database.scalar(
-        select(
-            DataSource
-        ).where(
-            DataSource.provider_name
-            == "alpha_vantage",
-
-            DataSource.dataset_name
-            == "TIME_SERIES_DAILY",
-        )
-    )
+    if source_id is None:
+        source = database.scalar(select(DataSource).where(
+            DataSource.provider_name == "alpha_vantage", DataSource.dataset_name == "TIME_SERIES_DAILY"))
+    else:
+        source = database.get(DataSource, source_id)
+        if source is not None and not (
+            (source.provider_name == "alpha_vantage" and source.dataset_name == "TIME_SERIES_DAILY")
+            or (source.provider_name.startswith("csv_") and source.dataset_name == "RAW_DAILY_CSV")
+        ):
+            raise ValueError("Selected source is not a supported raw daily-price source")
 
     if source is None:
         raise LookupError(
