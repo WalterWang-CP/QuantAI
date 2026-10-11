@@ -2,6 +2,7 @@ from fastapi import FastAPI
 from fastapi.responses import JSONResponse
 from sqlalchemy import text
 
+from app.dashboard.routes import router as dashboard_router
 from app.core.config import settings
 from app.db.database import engine
 from app.filings.routes import router as filings_router
@@ -25,6 +26,7 @@ app = FastAPI(
 )
 
 
+app.include_router(dashboard_router)
 app.include_router(filings_router)
 app.include_router(policy_router)
 app.include_router(identity_router)

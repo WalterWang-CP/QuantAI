@@ -1,0 +1,16 @@
+<!doctype html>
+<html lang="en">
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>QuantAI · Data inspector</title><link rel="stylesheet" href="/dashboard/assets/dashboard.css"><script defer src="/dashboard/assets/dashboard.js"></script></head>
+<body>
+<header><a class="brand" href="/dashboard">Q<span>QuantAI</span></a><span class="tag">DATA ENGINE</span><a href="/docs">API documentation ↗</a></header>
+<div class="intro"><div><p class="eyebrow">WORKSPACE / INSPECTION</p><h1>Follow the data.</h1><p class="muted">Inspect company records and trace each calculation to its captured evidence.</p></div><span class="badge">Read-only</span></div>
+<main>
+<aside><h2>Companies</h2><label for="search">Search by company name</label><div class="search"><input id="search" type="search" placeholder="Apple, NVIDIA…" maxlength="100"><button id="search-button">Search</button></div><p id="company-status" role="status" class="muted"></p><div id="companies"></div><div class="pager"><button id="company-prev">Previous</button><button id="company-next">Next</button></div></aside>
+<section class="workspace"><div class="section-head"><div><p class="eyebrow">SELECTED COMPANY</p><h2 id="company-name">Choose a company</h2><p id="company-id" class="muted identifier"></p></div><button id="refresh" disabled>Refresh records</button></div>
+<p class="notice">This page displays stored records. It does not verify price basis, share mappings, split coverage, or completion of the real-data pilot.</p>
+<nav id="tabs" aria-label="Record categories"></nav>
+<div id="price-controls" hidden><label for="listing">Listing</label><select id="listing"></select><label for="source">Price source</label><select id="source"></select><div class="dates"><label>From<input id="start" type="date"></label><label>Through<input id="end" type="date"></label><button id="filter">Apply dates</button></div><p id="source-summary" class="muted"></p></div>
+<div class="section-head"><h3 id="category">Records</h3><span id="page-label" class="muted"></span></div><p id="record-status" role="status" class="muted">Select a company to inspect its stored data.</p><div id="table" class="table-wrap"></div><div class="pager"><button id="prev" disabled>Previous</button><button id="next" disabled>Next</button></div>
+<section class="detail"><div class="section-head"><h3>Record evidence</h3><button id="clear">Clear selection</button></div><p id="detail-label" class="muted">Choose Inspect beside a record. Snapshot inspection shows the captured calculation, not a new calculation.</p><div id="detail-actions"></div><pre id="detail">No record selected.</pre></section>
+</section></main><footer>QuantAI · Part One data engine <span>Current inventory · Historical completeness remains to be validated</span></footer>
+</body></html>
