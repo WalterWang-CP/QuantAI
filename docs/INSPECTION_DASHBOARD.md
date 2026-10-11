@@ -1,5 +1,7 @@
 # Local inspection dashboard
 
+This document records the original inspection stage. The following dashboard-actions stage adds CSV import and SEC market-cap forms; see [DASHBOARD_ACTIONS.md](DASHBOARD_ACTIONS.md) for the current controls and checks. The read-only descriptions and counts below refer to the original stage.
+
 This stage adds a read-only dashboard at http://127.0.0.1:8010/dashboard. It displays stored company data and captured SEC market-cap calculation evidence. It does not import data, normalize shares, create mappings, or calculate new snapshots. The real-data pilot remains pending.
 
 ## Files

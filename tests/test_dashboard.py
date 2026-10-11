@@ -126,7 +126,7 @@ def test_http_assets_and_invalid_paths(http_client):
         assert response.status_code == 200
         assert response.headers["cache-control"] == "no-store"
         assert response.headers["x-content-type-options"] == "nosniff"
-    assert "Read-only" in client.get("/dashboard").text
+    assert "Data workspace" in client.get("/dashboard").text
     assert client.get("/dashboard/assets/arbitrary.txt").status_code == 422
     assert client.get("/dashboard/api/companies?limit=201").status_code == 422
     assert client.get("/dashboard/api/companies?offset=-1").status_code == 422

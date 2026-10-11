@@ -3,13 +3,36 @@
 <head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>QuantAI · Data inspector</title><link rel="stylesheet" href="/dashboard/assets/dashboard.css"><script defer src="/dashboard/assets/dashboard.js"></script></head>
 <body>
 <header><a class="brand" href="/dashboard">Q<span>QuantAI</span></a><span class="tag">DATA ENGINE</span><a href="/docs">API documentation ↗</a></header>
-<div class="intro"><div><p class="eyebrow">WORKSPACE / INSPECTION</p><h1>Follow the data.</h1><p class="muted">Inspect company records and trace each calculation to its captured evidence.</p></div><span class="badge">Read-only</span></div>
+<div class="intro"><div><p class="eyebrow">WORKSPACE / INSPECTION</p><h1>Follow the data.</h1><p class="muted">Inspect company records and trace each calculation to its captured evidence.</p></div><span class="badge">Data workspace</span></div>
 <main>
 <aside><h2>Companies</h2><label for="search">Search by company name</label><div class="search"><input id="search" type="search" placeholder="Apple, NVIDIA…" maxlength="100"><button id="search-button">Search</button></div><p id="company-status" role="status" class="muted"></p><div id="companies"></div><div class="pager"><button id="company-prev">Previous</button><button id="company-next">Next</button></div></aside>
 <section class="workspace"><div class="section-head"><div><p class="eyebrow">SELECTED COMPANY</p><h2 id="company-name">Choose a company</h2><p id="company-id" class="muted identifier"></p></div><button id="refresh" disabled>Refresh records</button></div>
 <p class="notice">This page displays stored records. It does not verify price basis, share mappings, split coverage, or completion of the real-data pilot.</p>
+<div id="listing-controls" hidden><div class="control-grid"><div><label for="listing">Selected listing</label><select id="listing"></select></div><div><label for="source">Price source for viewing and calculation</label><select id="source"></select></div></div><p id="source-summary" class="muted"></p></div>
+<section id="operations" hidden aria-label="Data operations">
+<details id="import-panel"><summary>Import a raw-price CSV</summary><p class="muted">Import into the selected listing. Existing rows from the same named CSV source may be updated; earlier archives and snapshots remain.</p>
+<form id="csv-form"><fieldset id="csv-fields" disabled>
+<div class="control-grid"><div><label for="csv-symbol">Listing ticker</label><input id="csv-symbol" readonly required></div><div><label for="csv-currency">Currency</label><input id="csv-currency" readonly required></div></div>
+<label for="csv-file">UTF-8 CSV · maximum 2 MB · date,open,high,low,close,volume</label><input id="csv-file" type="file" accept=".csv,text/csv" required><p id="file-summary" class="muted">No file selected.</p>
+<label for="csv-source-name">Stable name for this CSV dataset</label><input id="csv-source-name" placeholder="historical_export" pattern="[a-z0-9][a-z0-9_-]{0,69}" maxlength="70" required>
+<label for="csv-source-url">Actual source page URL</label><input id="csv-source-url" type="url" placeholder="https://…" required>
+<label for="csv-source-note">Source, export details, and evidence that prices are unadjusted</label><textarea id="csv-source-note" minlength="20" maxlength="2000" rows="3" required></textarea>
+<label class="check"><input id="csv-confirm" type="checkbox" required> I confirm these are unadjusted OHLC prices.</label>
+<button id="csv-submit" type="submit">Import prices</button></fieldset></form>
+<p id="import-status" role="status" class="muted"></p><div id="import-actions"></div><details id="import-result-box" hidden><summary>Import receipt</summary><pre id="import-result"></pre></details></details>
+<details id="calculation-panel"><summary>Save an SEC market-cap snapshot</summary><p class="muted">USD listings only. Check eligible inputs, review the split interval, then supply the evidence for your calculation.</p>
+<form id="calculation-form"><fieldset id="calculation-fields" disabled>
+<label for="valuation-date">Valuation date</label><input id="valuation-date" type="date" required>
+<div class="control-grid"><div><label for="share-age">Maximum share age · days</label><input id="share-age" type="number" min="1" max="3660" value="400" required></div><div><label for="price-age">Maximum price age · days</label><input id="price-age" type="number" min="0" max="31" value="7" required></div></div>
+<button id="preview-inputs" type="button">Check eligible inputs</button><p id="preview-summary" role="status" class="muted">Choose a USD listing and stored price source.</p>
+<label for="split-url">Split-coverage evidence URL</label><input id="split-url" type="url" placeholder="https://…" required>
+<label for="split-note">Evidence covering the displayed interval</label><textarea id="split-note" minlength="20" maxlength="2000" rows="3" required></textarea>
+<label class="check"><input id="split-confirm" type="checkbox" required> I checked split coverage for the displayed share-to-price interval.</label>
+<button id="calculation-submit" type="submit" disabled>Save market-cap snapshot</button></fieldset></form>
+<p id="calculation-status" role="status" class="muted"></p><div id="calculation-actions"></div><details id="calculation-result-box" hidden><summary>Captured calculation evidence</summary><pre id="calculation-result"></pre></details></details>
+</section>
 <nav id="tabs" aria-label="Record categories"></nav>
-<div id="price-controls" hidden><label for="listing">Listing</label><select id="listing"></select><label for="source">Price source</label><select id="source"></select><div class="dates"><label>From<input id="start" type="date"></label><label>Through<input id="end" type="date"></label><button id="filter">Apply dates</button></div><p id="source-summary" class="muted"></p></div>
+<div id="price-controls" hidden><div class="dates"><label>From<input id="start" type="date"></label><label>Through<input id="end" type="date"></label><button id="filter">Apply dates</button></div></div>
 <div class="section-head"><h3 id="category">Records</h3><span id="page-label" class="muted"></span></div><p id="record-status" role="status" class="muted">Select a company to inspect its stored data.</p><div id="table" class="table-wrap"></div><div class="pager"><button id="prev" disabled>Previous</button><button id="next" disabled>Next</button></div>
 <section class="detail"><div class="section-head"><h3>Record evidence</h3><button id="clear">Clear selection</button></div><p id="detail-label" class="muted">Choose Inspect beside a record. Snapshot inspection shows the captured calculation, not a new calculation.</p><div id="detail-actions"></div><pre id="detail">No record selected.</pre></section>
 </section></main><footer>QuantAI · Part One data engine <span>Current inventory · Historical completeness remains to be validated</span></footer>

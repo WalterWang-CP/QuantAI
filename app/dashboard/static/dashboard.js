@@ -14,7 +14,7 @@ const categories = {
 };
 let company = null, category = "filings", offset = 0, companyOffset = 0, search = "";
 let generation = 0, recordsSequence = 0, detailSequence = 0, companiesSequence = 0, sourcesSequence = 0;
-let sources = [];
+let sources = [], listings = [], operationBusy = false, previewKey = null, previewSequence = 0, previewLoading = false, companyMore = false;
 const PAGE = 50;
 function status(id, message, error = false) { $(id).textContent = message; $(id).classList.toggle("error", error); }
 async function api(path) {
@@ -39,7 +39,7 @@ function clearRecords() {
 function options(id, rows, value, label) {
   $(id).replaceChildren();
   for (const row of rows) { const option = document.createElement("option"); option.value = row[value]; option.textContent = label(row); $(id).append(option); }
-  $(id).disabled = rows.length === 0;
+  $(id).disabled = operationBusy || rows.length === 0;
 }
 async function loadCompanies() {
   const sequence = ++companiesSequence;
@@ -50,22 +50,24 @@ async function loadCompanies() {
     if (sequence !== companiesSequence) return;
     status("company-status", result.items.length ? `Showing ${companyOffset + 1}–${companyOffset + result.items.length}` : "No matching companies.");
     for (const row of result.items) {
-      const button = document.createElement("button"); button.className = "company"; button.dataset.company = row.id;
+      const button = document.createElement("button"); button.className = "company"; button.dataset.company = row.id; button.disabled = operationBusy;
       button.classList.toggle("active", company?.id === row.id);
       const name = document.createElement("span"); name.textContent = row.legal_name;
       const note = document.createElement("small"); note.textContent = `${row.country_code || "Country unspecified"} · ${row.is_active ? "Active" : "Inactive"}`;
       button.append(name, note); button.addEventListener("click", () => chooseCompany(row)); $("companies").append(button);
     }
-    $("company-prev").disabled = companyOffset === 0; $("company-next").disabled = !result.has_more;
+    companyMore = result.has_more; $("company-prev").disabled = operationBusy || companyOffset === 0; $("company-next").disabled = operationBusy || !companyMore;
   } catch (error) { if (sequence === companiesSequence) status("company-status", error.message, true); }
 }
 function chooseCompany(row) {
+  if (operationBusy) return;
+  resetOperations(); listings = []; $("operations").hidden = false; $("listing-controls").hidden = false;
   company = row; generation++; sourcesSequence++; offset = 0; sources = [];
   $("company-name").textContent = row.legal_name; $("company-id").textContent = row.id; $("refresh").disabled = false;
   document.querySelectorAll(".company").forEach(button => button.classList.toggle("active", button.dataset.company === row.id));
   options("listing", [], "id", () => ""); options("source", [], "source_id", () => "");
   $("start").value = ""; $("end").value = ""; $("source-summary").textContent = "";
-  clearRecords(); loadListings(); loadRecords();
+  clearRecords(); updateOperationAvailability(); loadListings(); loadRecords();
 }
 async function loadListings() {
   const token = generation, path = companyPath();
@@ -76,14 +78,16 @@ async function loadListings() {
       if (token !== generation) return;
       rows.push(...result.items); more = result.has_more; cursor += result.items.length;
     }
+    listings = rows;
     options("listing", rows, "id", row => `${row.ticker} · ${row.exchange_code} · ${row.currency_code} (${row.start_date}–${row.end_date || "open"})`);
+    listingChanged();
     if (!rows.length) { if (category === "prices") status("record-status", "No listings stored for this company."); return; }
     loadSources();
   } catch (error) { if (token === generation) status("record-status", "Could not load listing choices: " + error.message, true); }
 }
-async function loadSources() {
+async function loadSources(preferredSource = null) {
   const token = generation, sequence = ++sourcesSequence, listing = $("listing").value;
-  options("source", [], "source_id", () => ""); sources = []; $("source-summary").textContent = "";
+  options("source", [], "source_id", () => ""); sources = []; $("source-summary").textContent = ""; invalidatePreview(); updateOperationAvailability();
   if (category === "prices") { clearRecords(); status("record-status", "Loading price sources…"); }
   if (!listing) return;
   try {
@@ -91,7 +95,8 @@ async function loadSources() {
     if (token !== generation || sequence !== sourcesSequence) return;
     sources = result;
     options("source", sources, "source_id", row => `${row.provider_name} / ${row.dataset_name}`);
-    updateSourceSummary(); if (category === "prices") { offset = 0; loadRecords(); }
+    if (preferredSource && sources.some(row => row.source_id === preferredSource)) $("source").value = preferredSource;
+    updateSourceSummary(); invalidatePreview(); updateOperationAvailability(); if (category === "prices") { offset = 0; loadRecords(); }
   } catch (error) { if (token === generation && sequence === sourcesSequence) status("record-status", error.message, true); }
 }
 function updateSourceSummary() {
@@ -163,9 +168,155 @@ $("company-prev").addEventListener("click", () => { companyOffset = Math.max(0, 
 $("company-next").addEventListener("click", () => { companyOffset += 25; loadCompanies(); });
 $("prev").addEventListener("click", () => { offset = Math.max(0, offset - PAGE); loadRecords(); });
 $("next").addEventListener("click", () => { offset += PAGE; loadRecords(); });
-$("listing").addEventListener("change", () => { offset = 0; loadSources(); });
-$("source").addEventListener("change", () => { offset = 0; updateSourceSummary(); loadRecords(); });
+$("listing").addEventListener("change", () => { offset = 0; listingChanged(); loadSources(); });
+$("source").addEventListener("change", () => { offset = 0; updateSourceSummary(); invalidatePreview(); updateOperationAvailability(); loadRecords(); });
 $("filter").addEventListener("click", () => { offset = 0; loadRecords(); });
 $("refresh").addEventListener("click", () => { if (company) chooseCompany(company); });
 $("clear").addEventListener("click", clearDetail);
 loadCompanies();
+
+function selectedListing() { return listings.find(row => row.id === $("listing").value); }
+function selectedSource() { return sources.find(row => row.source_id === $("source").value); }
+function rawSource(source) {
+  return source && ((source.provider_name === "alpha_vantage" && source.dataset_name === "TIME_SERIES_DAILY") ||
+    (source.provider_name.startsWith("csv_") && source.dataset_name === "RAW_DAILY_CSV"));
+}
+function inputKey() {
+  return JSON.stringify([company?.id, $("listing").value, $("source").value, $("valuation-date").value, $("share-age").value, $("price-age").value]);
+}
+function updateOperationAvailability() {
+  const listing = selectedListing(), source = selectedSource();
+  $("csv-fields").disabled = operationBusy || !listing;
+  $("calculation-fields").disabled = operationBusy || !listing || listing.currency_code.toUpperCase() !== "USD" || !rawSource(source);
+  $("preview-inputs").disabled = operationBusy || previewLoading;
+  $("calculation-submit").disabled = operationBusy || previewLoading || previewKey !== inputKey();
+}
+function invalidatePreview() {
+  previewKey = null; previewSequence++; previewLoading = false; $("split-confirm").checked = false;
+  const listing = selectedListing();
+  const message = !listing ? "Choose a listing." : listing.currency_code.toUpperCase() !== "USD" ? "SEC market-cap reconstruction currently supports USD listings only." : !rawSource(selectedSource()) ? "Choose a supported raw-price source with stored prices." : "Check eligible inputs before confirming split coverage.";
+  status("preview-summary", message); updateOperationAvailability();
+}
+function resetResult(kind) {
+  status(`${kind}-status`, ""); $(`${kind}-actions`).replaceChildren(); $(`${kind}-result`).textContent = "";
+  $(`${kind}-result-box`).hidden = true;
+}
+function resetOperations() {
+  $("csv-form").reset(); $("calculation-form").reset();
+  status("file-summary", "No file selected."); resetResult("import"); resetResult("calculation"); invalidatePreview();
+}
+function listingChanged() {
+  resetOperations(); const listing = selectedListing();
+  $("csv-symbol").value = listing?.ticker || ""; $("csv-currency").value = listing?.currency_code || "";
+  $("valuation-date").min = listing?.start_date || ""; $("valuation-date").max = listing?.end_date || "";
+  updateOperationAvailability();
+}
+function setOperationBusy(value) {
+  operationBusy = value;
+  for (const id of ["search", "search-button", "refresh"]) $(id).disabled = value || (id === "refresh" && !company);
+  document.querySelectorAll(".company").forEach(button => { button.disabled = value; });
+  $("company-prev").disabled = value || companyOffset === 0; $("company-next").disabled = value || !companyMore;
+  $("listing").disabled = value || listings.length === 0; $("source").disabled = value || sources.length === 0;
+  updateOperationAvailability();
+}
+function evidenceLink(kind, artifactId) {
+  if (!artifactId) return;
+  const link = document.createElement("a"); link.textContent = "Download captured CSV";
+  link.href = `/market-data/csv-artifacts/${encodeURIComponent(artifactId)}`; link.setAttribute("download", ""); $(`${kind}-actions`).append(link);
+}
+function showResult(kind, result) {
+  $(`${kind}-result`).textContent = JSON.stringify(result, null, 2); $(`${kind}-result-box`).hidden = false;
+}
+async function postJSON(path, payload) {
+  let response;
+  try {
+    response = await fetch(path, {method: "POST", headers: {Accept: "application/json", "Content-Type": "application/json"}, body: JSON.stringify(payload), cache: "no-store"});
+  } catch (_) { throw new Error("Could not confirm the request outcome. Inspect stored archives or snapshots before retrying."); }
+  let body;
+  try { body = await response.json(); }
+  catch (_) { throw new Error(`Could not read the response (${response.status}). Inspect stored records before retrying.`); }
+  if (!response.ok) {
+    const details = Array.isArray(body.detail) ? body.detail.map(item => `${(item.loc || []).filter(part => part !== "body").join(".")}: ${item.msg}`).join("; ") : body.detail;
+    throw new Error(`Request rejected (${response.status}): ${typeof details === "string" ? details : "See API response for details"}`);
+  }
+  return body;
+}
+$("csv-file").addEventListener("change", () => {
+  $("csv-confirm").checked = false; resetResult("import");
+  const file = $("csv-file").files[0];
+  status("file-summary", file ? `${file.name} · ${file.size} bytes. The complete file will be validated on import.` : "No file selected.");
+});
+$("csv-form").addEventListener("submit", async event => {
+  event.preventDefault(); if (operationBusy) return;
+  const listing = selectedListing(), file = $("csv-file").files[0];
+  if (!listing || !$("csv-form").reportValidity()) return;
+  resetResult("import");
+  if (!file || file.size === 0 || file.size > 2000000) { status("import-status", "Choose a nonempty UTF-8 CSV no larger than 2 MB.", true); return; }
+  if ($("csv-source-note").value.trim().length < 20) { status("import-status", "Explain the source and unadjusted-price evidence in at least 20 characters.", true); return; }
+  const payload = {source_name: $("csv-source-name").value, source_url: $("csv-source-url").value,
+    source_note: $("csv-source-note").value, symbol: listing.ticker, currency_code: listing.currency_code,
+    confirm_unadjusted_prices: $("csv-confirm").checked};
+  setOperationBusy(true); status("import-status", "Reading and importing CSV…");
+  let result = null;
+  try {
+    const bytes = await file.arrayBuffer();
+    try { payload.csv_text = new TextDecoder("utf-8", {fatal: true, ignoreBOM: true}).decode(bytes); }
+    catch (_) { throw new Error("This file is not valid UTF-8. Save a UTF-8 copy before importing."); }
+    result = await postJSON(`/market-data/listings/${encodeURIComponent(listing.id)}/daily/import-csv`, payload);
+    showResult("import", result); evidenceLink("import", result.csv_artifact_id);
+    status("import-status", result.created ? `Imported ${result.rows_received} rows: ${result.rows_inserted} inserted, ${result.rows_updated} updated.` : "This exact import already exists. No prices were changed.");
+  } catch (error) { status("import-status", error.message, true); }
+  finally { setOperationBusy(false); }
+  if (result) { invalidatePreview(); await loadSources(result.source_id); if (category !== "prices") loadRecords(); }
+});
+async function previewInputs() {
+  if (operationBusy || previewLoading) return;
+  const listing = selectedListing(), source = selectedSource();
+  if (!listing || listing.currency_code.toUpperCase() !== "USD" || !rawSource(source)) return;
+  for (const id of ["valuation-date", "share-age", "price-age"]) if (!$(id).reportValidity()) return;
+  invalidatePreview(); const sequence = previewSequence, key = inputKey(), token = generation;
+  previewLoading = true; updateOperationAvailability(); status("preview-summary", "Checking eligible shares and latest stored price…");
+  const valuation = $("valuation-date").value, shareAge = $("share-age").value, priceAge = Number($("price-age").value);
+  try {
+    const [shares, pricePage] = await Promise.all([
+      api(`/filings/securities/${encodeURIComponent(listing.security_id)}/selected-shares?` + new URLSearchParams({valuation_date: valuation, max_age_days: shareAge})),
+      api(`${companyPath()}/listings/${encodeURIComponent(listing.id)}/prices?` + new URLSearchParams({source_id: source.source_id, end: valuation, limit: 1, offset: 0}))
+    ]);
+    if (sequence !== previewSequence || token !== generation || key !== inputKey()) return;
+    const price = pricePage.items[0];
+    if (!price) throw new Error("No price is stored on or before this valuation date for the selected source.");
+    const age = Math.round((Date.parse(valuation + "T00:00:00Z") - Date.parse(price.trading_date + "T00:00:00Z")) / 86400000);
+    if (age > priceAge) throw new Error(`Selected price is ${age} days old; the maximum is ${priceAge}.`);
+    const interval = [shares.observation_date, price.trading_date].sort();
+    status("preview-summary", `Shares: ${shares.shares_outstanding} observed ${shares.observation_date}, known ${shares.known_date}. Price: ${price.close_price} USD on ${price.trading_date}. Check split coverage from ${interval[0]} through ${interval[1]}. The server revalidates inputs when saving.`);
+    previewKey = key;
+  } catch (error) { if (sequence === previewSequence && token === generation) status("preview-summary", error.message, true); }
+  finally { if (sequence === previewSequence) { previewLoading = false; updateOperationAvailability(); } }
+}
+$("preview-inputs").addEventListener("click", previewInputs);
+for (const id of ["valuation-date", "share-age", "price-age"]) $(id).addEventListener("input", invalidatePreview);
+$("calculation-form").addEventListener("submit", async event => {
+  event.preventDefault(); if (operationBusy) return;
+  if (!previewKey || previewKey !== inputKey()) { invalidatePreview(); return; }
+  if (!$("calculation-form").reportValidity()) return;
+  resetResult("calculation");
+  if ($("split-note").value.trim().length < 20) { status("calculation-status", "Explain the split-coverage evidence in at least 20 characters.", true); return; }
+  const listing = selectedListing(), source = selectedSource();
+  const payload = {valuation_date: $("valuation-date").value, price_source_id: source.source_id,
+    max_share_age_days: Number($("share-age").value), max_price_age_days: Number($("price-age").value),
+    confirm_split_coverage: $("split-confirm").checked, split_evidence_url: $("split-url").value, split_evidence_note: $("split-note").value};
+  setOperationBusy(true); status("calculation-status", "Saving captured market-cap calculation…");
+  let result = null;
+  try {
+    result = await postJSON(`/market-cap/listings/${encodeURIComponent(listing.id)}/reconstruct-sec`, payload);
+    showResult("calculation", result); evidenceLink("calculation", result.manifest.price.csv_artifact_id);
+    status("calculation-status", `${result.created ? "Saved new snapshot" : "Identical snapshot already exists"}: ${result.manifest.result.market_cap_usd} USD on ${result.valuation_date}.`);
+    const button = document.createElement("button"); button.type = "button"; button.textContent = "Inspect saved snapshot";
+    const companyId = company.id;
+    button.addEventListener("click", () => { if (company?.id === companyId) inspect({id: result.snapshot_id}, "snapshots", companyId); });
+    $("calculation-actions").append(button);
+  } catch (error) { status("calculation-status", error.message, true); }
+  finally { setOperationBusy(false); }
+  if (result) loadRecords();
+});
+updateOperationAvailability();
