@@ -15,6 +15,8 @@ const categories = {
 let company = null, category = "filings", offset = 0, companyOffset = 0, search = "";
 let generation = 0, recordsSequence = 0, detailSequence = 0, companiesSequence = 0, sourcesSequence = 0;
 let sources = [], listings = [], operationBusy = false, previewKey = null, previewSequence = 0, previewLoading = false, companyMore = false;
+let cikMappings = [], cikSequence = 0;
+let mappingSecurities = [], mappingSequence = 0;
 const PAGE = 50;
 function status(id, message, error = false) { $(id).textContent = message; $(id).classList.toggle("error", error); }
 async function api(path) {
@@ -61,13 +63,13 @@ async function loadCompanies() {
 }
 function chooseCompany(row) {
   if (operationBusy) return;
-  resetOperations(); listings = []; $("operations").hidden = false; $("listing-controls").hidden = false;
+  resetCompanyOperations(); resetOperations(); listings = []; $("operations").hidden = false; $("listing-controls").hidden = false;
   company = row; generation++; sourcesSequence++; offset = 0; sources = [];
   $("company-name").textContent = row.legal_name; $("company-id").textContent = row.id; $("refresh").disabled = false;
   document.querySelectorAll(".company").forEach(button => button.classList.toggle("active", button.dataset.company === row.id));
   options("listing", [], "id", () => ""); options("source", [], "source_id", () => "");
   $("start").value = ""; $("end").value = ""; $("source-summary").textContent = "";
-  clearRecords(); updateOperationAvailability(); loadListings(); loadRecords();
+  clearRecords(); updateOperationAvailability(); loadListings(); loadCikMappings(); loadMappingSecurities(); loadRecords();
 }
 async function loadListings() {
   const token = generation, path = companyPath();
@@ -186,6 +188,9 @@ function inputKey() {
 }
 function updateOperationAvailability() {
   const listing = selectedListing(), source = selectedSource();
+  $("mapping-fields").disabled = operationBusy || !company || mappingSecurities.length === 0;
+  $("sec-fields").disabled = operationBusy || !company || cikMappings.length === 0;
+  $("normalization-fields").disabled = operationBusy || !company;
   $("csv-fields").disabled = operationBusy || !listing;
   $("calculation-fields").disabled = operationBusy || !listing || listing.currency_code.toUpperCase() !== "USD" || !rawSource(source);
   $("preview-inputs").disabled = operationBusy || previewLoading;
@@ -198,7 +203,7 @@ function invalidatePreview() {
   status("preview-summary", message); updateOperationAvailability();
 }
 function resetResult(kind) {
-  status(`${kind}-status`, ""); $(`${kind}-actions`).replaceChildren(); $(`${kind}-result`).textContent = "";
+  status(`${kind}-status`, ""); if ($(`${kind}-actions`)) $(`${kind}-actions`).replaceChildren(); $(`${kind}-result`).textContent = "";
   $(`${kind}-result-box`).hidden = true;
 }
 function resetOperations() {
@@ -320,3 +325,113 @@ $("calculation-form").addEventListener("submit", async event => {
   if (result) loadRecords();
 });
 updateOperationAvailability();
+
+function resetCompanyOperations() {
+  mappingSequence++; mappingSecurities = []; $("mapping-form").reset(); options("mapping-security", [], "id", () => "");
+  resetResult("mapping"); status("mapping-choice-status", "Loading common-stock securities…");
+  cikSequence++; cikMappings = []; $("sec-form").reset(); options("sec-cik", [], "id", () => "");
+  status("cik-status", "Loading registered CIKs…"); status("sec-warnings", "");
+  resetResult("sec"); resetResult("normalization");
+}
+async function loadCikMappings() {
+  const sequence = ++cikSequence, token = generation;
+  try {
+    const rows = await api(`/identity-resolution/companies/${encodeURIComponent(company.id)}/identifiers`);
+    if (sequence !== cikSequence || token !== generation) return;
+    cikMappings = rows.filter(row => row.scheme === "CIK" && /^[0-9]{1,10}$/.test(String(row.value).trim()));
+    options("sec-cik", cikMappings, "id", row => `${String(row.value).trim().padStart(10, "0")} · ${row.valid_from || "open"} through ${row.valid_to || "open"}`);
+    if (cikMappings.length > 1) {
+      const placeholder = document.createElement("option"); placeholder.value = ""; placeholder.textContent = "Choose the registered CIK for this import";
+      $("sec-cik").prepend(placeholder); $("sec-cik").value = "";
+    }
+    status("cik-status", cikMappings.length ? "The server verifies that CIK validity covers the requested filing dates." : "No registered CIK found. Register the company identifier through the identity-resolution API before importing SEC data.");
+    updateOperationAvailability();
+  } catch (error) {
+    if (sequence === cikSequence && token === generation) { status("cik-status", error.message, true); updateOperationAvailability(); }
+  }
+}
+$("sec-form").addEventListener("submit", async event => {
+  event.preventDefault(); if (operationBusy || !company) return;
+  if (!$("sec-form").reportValidity()) return;
+  const mapping = cikMappings.find(row => row.id === $("sec-cik").value);
+  if (!mapping) return;
+  resetResult("sec"); status("sec-warnings", "");
+  const start = $("sec-start").value, end = $("sec-end").value;
+  if (start && end && start > end) { status("sec-status", "Filed date from must be on or before Filed date through.", true); return; }
+  const companyId = company.id;
+  const payload = {cik: String(mapping.value).trim().padStart(10, "0"), start_date: start || null, end_date: end || null, include_history: $("sec-history").checked};
+  invalidatePreview(); setOperationBusy(true); status("sec-status", "Fetching and storing SEC data… Older metadata archives can take time; keep this page open.");
+  let result = null;
+  try {
+    result = await postJSON(`/filings/companies/${encodeURIComponent(companyId)}/import-sec`, payload);
+    showResult("sec", result);
+    status("sec-status", `${result.status}: ${result.filings_inserted} filings and ${result.facts_inserted} facts inserted; ${result.facts_existing} facts already stored; ${result.facts_rejected} rejected. Older metadata history ${result.metadata_history_complete ? "complete for this request" : "incomplete"}. Review SEC share facts as the next step.`);
+    status("sec-warnings", result.warnings.length ? "SEC import warnings:\n" + result.warnings.join("\n") : "");
+    invalidatePreview();
+  } catch (error) { status("sec-status", error.message, true); }
+  finally { setOperationBusy(false); }
+  if (result) loadRecords();
+});
+$("normalize-submit").addEventListener("click", async () => {
+  if (operationBusy || !company) return;
+  const companyId = company.id; resetResult("normalization"); invalidatePreview();
+  setOperationBusy(true); status("normalization-status", "Reviewing stored SEC share facts…");
+  let result = null;
+  try {
+    result = await postJSON(`/filings/companies/${encodeURIComponent(companyId)}/normalize-shares`, undefined);
+    showResult("normalization", result);
+    status("normalization-status", `Reviewed ${result.facts_reviewed} facts: ${result.accepted} accepted, ${result.excluded} excluded, ${result.conflicts} conflicting. ${result.reviews_inserted} reviews inserted; ${result.reviews_updated} updated. Rule: ${result.rule_version}.`);
+    invalidatePreview();
+  } catch (error) { status("normalization-status", error.message, true); }
+  finally { setOperationBusy(false); }
+  if (result) loadRecords();
+});
+
+async function loadMappingSecurities() {
+  const sequence = ++mappingSequence, token = generation, path = companyPath();
+  try {
+    let rows = [], cursor = 0, more = true;
+    while (more) {
+      const result = await api(`${path}/securities?limit=200&offset=${cursor}`);
+      if (sequence !== mappingSequence || token !== generation) return;
+      rows.push(...result.items); more = result.has_more; cursor += result.items.length;
+    }
+    mappingSecurities = rows.filter(row => row.security_type === "common_stock");
+    options("mapping-security", mappingSecurities, "id", row => `${row.name} · ${row.id} (${row.start_date || "open"}–${row.end_date || "open"})`);
+    if (mappingSecurities.length > 1) {
+      const placeholder = document.createElement("option"); placeholder.value = ""; placeholder.textContent = "Choose the security supported by your evidence";
+      $("mapping-security").prepend(placeholder); $("mapping-security").value = "";
+    }
+    status("mapping-choice-status", mappingSecurities.length ? "The server checks company ownership, lifetime, and other securities overlapping this interval." : "No common-stock security is stored for this company. Create the verified security through the identity API first. ADRs and other types are not supported by this mapping pilot.");
+    updateOperationAvailability();
+  } catch (error) { if (sequence === mappingSequence && token === generation) status("mapping-choice-status", error.message, true); }
+}
+$("mapping-security").addEventListener("change", () => { $("mapping-confirm").checked = false; });
+for (const id of ["mapping-from", "mapping-to", "mapping-known", "mapping-url", "mapping-note"]) {
+  $(id).addEventListener("input", () => { $("mapping-confirm").checked = false; });
+}
+$("mapping-form").addEventListener("submit", async event => {
+  event.preventDefault(); if (operationBusy || !company) return;
+  if (!$("mapping-form").reportValidity()) return;
+  const security = mappingSecurities.find(row => row.id === $("mapping-security").value);
+  if (!security) return;
+  resetResult("mapping");
+  const start = $("mapping-from").value, end = $("mapping-to").value, known = $("mapping-known").value;
+  if (start > end || known < start) { status("mapping-status", "Valid through and evidence-known date must be on or after Valid from.", true); return; }
+  if ((security.start_date && start < security.start_date) || (security.end_date && end > security.end_date)) {
+    status("mapping-status", "The mapping interval must fit within this security's lifetime.", true); return;
+  }
+  if ($("mapping-note").value.trim().length < 20) { status("mapping-status", "Explain the share-class evidence in at least 20 characters.", true); return; }
+  const companyId = company.id;
+  const payload = {security_id: security.id, valid_from: start, valid_to: end, known_date: known,
+    evidence_url: $("mapping-url").value, evidence_note: $("mapping-note").value,
+    confirm_single_common_class: $("mapping-confirm").checked};
+  invalidatePreview(); setOperationBusy(true); status("mapping-status", "Validating and saving share mapping…");
+  let result = null;
+  try {
+    result = await postJSON(`/filings/companies/${encodeURIComponent(companyId)}/share-scope`, payload);
+    showResult("mapping", result); status("mapping-status", `Mapping available: ${result.id}. An exact repeat reuses the existing mapping; overlapping evidence is not overwritten.`);
+  } catch (error) { status("mapping-status", error.message, true); }
+  finally { setOperationBusy(false); }
+  if (result) loadRecords();
+});

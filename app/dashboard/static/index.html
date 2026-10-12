@@ -10,6 +10,22 @@
 <p class="notice">This page displays stored records. It does not verify price basis, share mappings, split coverage, or completion of the real-data pilot.</p>
 <div id="listing-controls" hidden><div class="control-grid"><div><label for="listing">Selected listing</label><select id="listing"></select></div><div><label for="source">Price source for viewing and calculation</label><select id="source"></select></div></div><p id="source-summary" class="muted"></p></div>
 <section id="operations" hidden aria-label="Data operations">
+<details id="sec-panel"><summary>Import SEC filings and share facts</summary><p class="muted">Fetch periodic filing metadata and the supported company-wide share facts for the selected company. A registered CIK is required.</p>
+<form id="sec-form"><fieldset id="sec-fields" disabled>
+<label for="sec-cik">Registered company CIK</label><select id="sec-cik" required></select><p id="cik-status" role="status" class="muted">Select a company to load its registered CIKs.</p>
+<div class="control-grid"><div><label for="sec-start">Filed date from · optional</label><input id="sec-start" type="date"></div><div><label for="sec-end">Filed date through · optional</label><input id="sec-end" type="date"></div></div>
+<label class="check"><input id="sec-history" type="checkbox" checked> Follow older submissions metadata archives.</label>
+<button id="sec-submit" type="submit">Import SEC data</button></fieldset></form><p id="sec-status" role="status" class="muted"></p><p id="sec-warnings" role="status" class="muted"></p><details id="sec-result-box" hidden><summary>SEC import receipt</summary><pre id="sec-result"></pre></details></details>
+<details id="normalization-panel"><summary>Review SEC company-wide shares</summary><p class="muted">Classify the stored SEC share facts as accepted, excluded, or conflicting. A review does not create a security mapping or market-cap snapshot.</p><fieldset id="normalization-fields" disabled><button id="normalize-submit" type="button">Review SEC share facts</button></fieldset><p id="normalization-status" role="status" class="muted"></p><details id="normalization-result-box" hidden><summary>Share-review receipt</summary><pre id="normalization-result"></pre></details></details>
+<details id="mapping-panel"><summary>Map company-wide shares to a security</summary><p class="muted">Use verified evidence for one common-share class. This form does not infer share classes, create securities, or replace existing mappings.</p>
+<form id="mapping-form"><fieldset id="mapping-fields" disabled>
+<label for="mapping-security">Existing common-stock security</label><select id="mapping-security" required></select><p id="mapping-choice-status" role="status" class="muted">Select a company to load its securities.</p>
+<div class="control-grid"><div><label for="mapping-from">Valid from</label><input id="mapping-from" type="date" required></div><div><label for="mapping-to">Valid through</label><input id="mapping-to" type="date" required></div></div>
+<label for="mapping-known">Evidence publicly known on</label><input id="mapping-known" type="date" required>
+<label for="mapping-url">Share-class evidence URL</label><input id="mapping-url" type="url" placeholder="https://…" required>
+<label for="mapping-note">Evidence for this security and the complete validity interval</label><textarea id="mapping-note" minlength="20" maxlength="2000" rows="3" required></textarea>
+<label class="check"><input id="mapping-confirm" type="checkbox" required> I verified company-wide shares correspond to this single common-share class throughout the interval.</label>
+<button id="mapping-submit" type="submit">Save share mapping</button></fieldset></form><p id="mapping-status" role="status" class="muted"></p><details id="mapping-result-box" hidden><summary>Saved mapping evidence</summary><pre id="mapping-result"></pre></details></details>
 <details id="import-panel"><summary>Import a raw-price CSV</summary><p class="muted">Import into the selected listing. Existing rows from the same named CSV source may be updated; earlier archives and snapshots remain.</p>
 <form id="csv-form"><fieldset id="csv-fields" disabled>
 <div class="control-grid"><div><label for="csv-symbol">Listing ticker</label><input id="csv-symbol" readonly required></div><div><label for="csv-currency">Currency</label><input id="csv-currency" readonly required></div></div>
