@@ -1,0 +1,100 @@
+﻿{
+    "id":  "95611f08-630f-4979-b9c9-aa4d6134f658",
+    "listing_id":  "c60269b5-b34e-46f6-a7be-b5ea9fa0e3f2",
+    "company_id":  "9a4e920d-3bf7-440a-8f79-5a3a853d1b05",
+    "valuation_date":  "2025-11-03",
+    "input_hash":  "79d4398709d8cf563aee746c7d9bde7225f9f3db4174ac7ee0374de3631b3d0d",
+    "created_at":  "2026-10-14T06:42:43.802419+00:00",
+    "manifest":  {
+                     "calculation_rule":  "sec-usd-market-cap-v1",
+                     "company_id":  "9a4e920d-3bf7-440a-8f79-5a3a853d1b05",
+                     "currency":  "USD",
+                     "decimal_precision":  80,
+                     "fx":  {
+                                "from_currency":  "USD",
+                                "rate":  "1",
+                                "rate_record_id":  null,
+                                "to_currency":  "USD"
+                            },
+                     "limits":  {
+                                    "max_price_age_days":  0,
+                                    "max_share_age_days":  400
+                                },
+                     "listing_id":  "c60269b5-b34e-46f6-a7be-b5ea9fa0e3f2",
+                     "mapping":  {
+                                     "evidence_note":  "Apple\u0027s 2025 Form 10-K identifies its common stock as AAPL on Nasdaq and reports 14,776,353,000 common shares outstanding on October 17, 2025. This pilot maps company-wide common shares to Apple Inc. Common Stock from October 17 through November 3, 2025, assuming the disclosed single common-share class remained unchanged through the valuation date. November 1 is used as a conservative daily availability cutoff.",
+                                     "evidence_url":  "https://www.sec.gov/Archives/edgar/data/320193/000032019325000079/aapl-20250927.htm",
+                                     "id":  "f0a75b1d-e80c-4d26-ac82-1ba7d7e18d0a",
+                                     "known_date":  "2025-11-01",
+                                     "valid_from":  "2025-10-17",
+                                     "valid_to":  "2025-11-03"
+                                 },
+                     "price":  {
+                                   "artifact_id":  "6708ab70-a6b6-456b-9052-dc37b1ffaa58",
+                                   "artifact_path":  "database:csv_price_artifacts/a23571ae-1ca2-4902-95ea-67e98e606a85",
+                                   "artifact_sha256":  "a5746769f90b871637729c1d3000a6bc265c38d4fb1a6d5a1f8f8d4f6bc86cbb",
+                                   "bar_id":  "a076708f-749b-41b5-92bb-69c0f82952bc",
+                                   "basis":  "raw_close",
+                                   "close":  "269.05",
+                                   "csv_artifact_id":  "a23571ae-1ca2-4902-95ea-67e98e606a85",
+                                   "csv_declaration":  {
+                                                           "asserted_by_operator":  true,
+                                                           "currency_code":  "USD",
+                                                           "independently_verified":  false,
+                                                           "price_basis":  "unadjusted",
+                                                           "schema_version":  "raw-price-csv-v1",
+                                                           "source_name":  "yahoo_aapl_2025_pilot",
+                                                           "source_note":  "Yahoo Finance daily OHLCV for AAPL, 2025-10-17 through 2025-11-07. Prices rounded to cents; adjusted close excluded. Apple Investor Relations lists its latest split in 2020, supporting a split adjustment factor of one for this window.",
+                                                           "source_url":  "https://finance.yahoo.com/quote/AAPL/history/",
+                                                           "symbol":  "AAPL"
+                                                       },
+                                   "ingestion_run_id":  "14086516-5eef-40b7-8106-d7e71ae61f16",
+                                   "source_id":  "f6906723-f58e-44db-9f16-5bce2f9715fc",
+                                   "trading_date":  "2025-11-03"
+                               },
+                     "result":  {
+                                    "local_market_cap":  "3975577774650",
+                                    "market_cap_usd":  "3975577774650",
+                                    "shares_on_price_date":  "14776353000"
+                                },
+                     "security_id":  "e8df6671-f946-47d9-9048-d9f15a879216",
+                     "shares_fact":  {
+                                         "artifact_sha256":  "73a86c6aedc31f77cac2ea4df5f80f0b3bd7e6eb58bb4e01444fbedf3afb9c43",
+                                         "artifact_url":  "https://data.sec.gov/api/xbrl/companyfacts/CIK0000320193.json",
+                                         "fact_hash":  "99d46ea62bf88fe3001bb50374686d65410d7f283af4e52ec6c3b9c7f6c77b12",
+                                         "metadata_artifact_id":  "844c9aae-6332-49e0-98e5-3cd18a69d9c2",
+                                         "metadata_sha256":  "2821703cf04e1138923243a87cc5148673feb9d3792a5b6a7747d1e1a093bf7f",
+                                         "value_text":  "14776353000"
+                                     },
+                     "shares_selection":  {
+                                              "accession_number":  "0000320193-25-000079",
+                                              "artifact_id":  "7108fd57-3560-41aa-8e7d-0ad14f57c10a",
+                                              "company_id":  "9a4e920d-3bf7-440a-8f79-5a3a853d1b05",
+                                              "equivalent_raw_fact_ids":  [
+                                                                              "841a19b7-c82d-4cc4-8060-5a98abde2f26"
+                                                                          ],
+                                              "filing_id":  "7cea994f-723e-4ff8-8a8f-a6cf9be1197a",
+                                              "known_date":  "2025-11-01",
+                                              "mapping_id":  "f0a75b1d-e80c-4d26-ac82-1ba7d7e18d0a",
+                                              "normalized_fact_id":  "8e511e39-49dd-4a7b-af34-4300eb8c0a0f",
+                                              "observation_date":  "2025-10-17",
+                                              "raw_fact_id":  "841a19b7-c82d-4cc4-8060-5a98abde2f26",
+                                              "security_id":  "e8df6671-f946-47d9-9048-d9f15a879216",
+                                              "selection_rule":  "sec-shares-selection-v1",
+                                              "shares_outstanding":  "14776353000",
+                                              "valuation_date":  "2025-11-03"
+                                          },
+                     "split_coverage":  {
+                                            "asserted_by_operator":  true,
+                                            "end_date":  "2025-11-03",
+                                            "evidence_note":  "Apple Investor Relations lists five historical stock splits, with the latest in August 2020. This history supports no split between the SEC shares observation on October 17, 2025 and the selected closing price on November 3, 2025. The expected split factor for this interval is 1.",
+                                            "evidence_url":  "https://investor.apple.com/investor-relations/faq/default.aspx",
+                                            "independently_verified":  false,
+                                            "start_date":  "2025-10-17"
+                                        },
+                     "splits":  [
+
+                                ],
+                     "valuation_date":  "2025-11-03"
+                 }
+}
